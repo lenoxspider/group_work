@@ -40,10 +40,11 @@ This project strictly adheres to Domain-Driven Design (DDD) and Clean Architectu
   - File deliverables submitted
   - Last activity timestamp
 
-### 4. 📥 File Deliverable Vault (DM Submission)
-- Students DM files (PDF, docx, code, zip) directly to the bot.
-- The bot computes a SHA-256 hash, renames the file (`draft_v1_YYYYMMDD_<hash[:8]>.ext`), saves it into `./uploads/`, sends a verified receipt in DM, and announces the submission in `#submissions`.
-- Credits the member's `files_submitted` counter in the contribution report.
+### 4. 📥 File Deliverable Vault (`/submit`)
+- **Command**: `/submit file:<attachment> [notes:<optional description>]`
+- Students submit project files directly in their Discord server.
+- The bot computes a SHA-256 cryptographic hash, renames the file (`draft_v1_YYYYMMDD_<hash[:8]>.ext`), archives it safely into `./uploads/`, and posts an embed card into `#submissions` with the verification details and submitter information.
+- Transparent for the whole team and increments the student's `files_submitted` counter in the `/report` anti-free-riding metrics.
 
 ### 5. 🛠️ Server Setup & Auto-Provisioning
 - Automatically provisions `#tasks`, `#deadlines`, and `#submissions` when joining a server.

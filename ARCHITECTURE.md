@@ -137,13 +137,13 @@ discord_group_work/
 6. `tasks_cog.py` calls `TaskService.mark_reminder_sent(task_id, tier)`.
 7. `TaskRepository` updates database.
 
-### 4.3 DM File Deliverable Vault
-1. Student sends a DM with a file attachment to the bot.
-2. `interface/cogs/tracker_cog.py` catches `on_message` with `isinstance(channel, DMChannel)`.
-3. Reads file bytes, passes filename and bytes to `VaultService.store_deliverable(user_id, filename, bytes)`.
+### 4.3 In-Server Deliverable Vault (`/submit`)
+1. Student enters `/submit file:<attachment> [notes:<optional>]` in their Discord server.
+2. `interface/cogs/tracker_cog.py` validates server context and file size limit (25MB).
+3. Reads file bytes, passes filename, bytes, and notes to `VaultService.store_deliverable(guild_id, user_id, filename, bytes, notes)`.
 4. `VaultService` calls `VaultStorage.save(filename, bytes)` -> computes SHA-256 hash, renames as `draft_v1_YYYYMMDD_<hash>.ext`, saves to disk in `./uploads/`.
-5. `VaultService` calls `ActivityRepository.record_file_submission(user_id)`.
-6. `tracker_cog.py` returns a verified receipt embed in DM and posts an announcement in the server's `#submissions` channel.
+5. `VaultService` calls `ActivityRepository.record_file_submission(guild_id, user_id)`.
+6. `tracker_cog.py` formats a verified submission embed via `discord_formatters.py` and posts it to `#submissions` for transparent team peer review.
 
 ## 5. External Dependencies
 - **Discord Gateway**: Connected through `discord.py` Client in `interface/bot.py`.

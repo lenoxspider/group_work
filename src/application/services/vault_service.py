@@ -23,6 +23,7 @@ class VaultSubmissionResultDTO:
     stored_filename: str
     file_hash: str
     file_size: int
+    notes: Optional[str] = None
 
 class VaultService:
     """Orchestrates deliverable file verification and activity recording."""
@@ -36,7 +37,8 @@ class VaultService:
         guild_id: Optional[str],
         user_id: str,
         filename: str,
-        content: bytes
+        content: bytes,
+        notes: Optional[str] = None
     ) -> VaultSubmissionResultDTO:
         """
         Stores deliverable file and credits user's contribution record.
@@ -46,6 +48,7 @@ class VaultService:
             user_id: Discord user ID of submitter.
             filename: Original file name.
             content: Raw file bytes.
+            notes: Optional submission notes/description.
 
         Returns:
             VaultSubmissionResultDTO: Verification details including SHA-256 hash.
@@ -58,5 +61,6 @@ class VaultService:
             original_filename=filename,
             stored_filename=stored_name,
             file_hash=file_hash,
-            file_size=file_size
+            file_size=file_size,
+            notes=notes
         )

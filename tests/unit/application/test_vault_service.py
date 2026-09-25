@@ -29,8 +29,28 @@ class TestVaultService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.stored_filename, "draft_20260925_abcdef12.pdf")
         self.assertEqual(result.file_hash, "abcdef1234567890")
         self.assertEqual(result.file_size, 1024)
+        self.assertIsNone(result.notes)
         self.mock_storage.store_file.assert_awaited_once_with("draft.pdf", b"file bytes")
         self.mock_activity_repo.record_file_submission.assert_awaited_once_with("guild-1", "user-1")
+
+    async def test_store_deliverable_with_notes(self):
+        self.mock_storage.store_file.return_value = (
+            "report_20260925_12345678.pdf",
+            "1234567890abcdef",
+            2048
+        )
+
+        result = await self.service.store_deliverable(
+            guild_id="guild-1",
+            user_id="user-2",
+            filename="report.pdf",
+            content=b"report content",
+            notes="Revised introduction and methodology"
+        )
+
+        self.assertEqual(result.notes, "Revised introduction and methodology")
+        self.assertEqual(result.stored_filename, "report_20260925_12345678.pdf")
+        self.mock_activity_repo.record_file_submission.assert_awaited_once_with("guild-1", "user-2")
 
 if __name__ == "__main__":
     unittest.main()

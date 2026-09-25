@@ -71,8 +71,8 @@ class AdminCog(commands.Cog, name="Administration"):
             value=(
                 "• `/task add` — Assign tasks with auto-reminders\n"
                 "• `/deadline add` — Live pinned countdowns\n"
-                "• `/report` — Anti-free-riding contribution scoreboard\n"
-                "• Direct DM — Send files to bot for verified hash archiving"
+                "• `/submit` — Submit deliverables with cryptographic verification\n"
+                "• `/report` — Anti-free-riding contribution scoreboard"
             ),
             inline=False
         )
@@ -113,7 +113,7 @@ class AdminCog(commands.Cog, name="Administration"):
         )
         embed.add_field(
             name="4. 📥 File Deliverable Vault",
-            value="DM files directly to the bot. It calculates a SHA-256 hash, renames with timestamp & hash, and awards submission credit.",
+            value="`/submit file:<attachment> [notes:<text>]` — Uploads and verifies project deliverables with SHA-256 hash logging, transparently posted to `#submissions`.",
             inline=False
         )
         embed.set_footer(text="Automated alerts: T-24h & T-1h for tasks; T-72h, T-24h & T-6h for milestones.")

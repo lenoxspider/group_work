@@ -127,17 +127,20 @@ def build_guild_report_embed(dto: GuildReportDTO, guild: discord.Guild) -> disco
     return embed
 
 def build_vault_receipt_embed(dto: VaultSubmissionResultDTO, user_name: str) -> discord.Embed:
-    """Builds a verified submission receipt embed for DM vault."""
+    """Builds a verified submission receipt embed for vault uploads."""
     embed = discord.Embed(
-        title="📥 Deliverable Verified & Stored",
-        description="Your group project deliverable has been archived in the secure vault.",
+        title="📦 Verified Deliverable Submitted",
+        description=f"Deliverable has been cryptographically verified and archived.",
         color=COLOR_SUCCESS,
         timestamp=datetime.now(timezone.utc)
     )
     size_kb = round(dto.file_size / 1024, 2)
+    embed.add_field(name="👤 Submitter", value=user_name, inline=True)
     embed.add_field(name="📄 Original Name", value=f"`{dto.original_filename}`", inline=True)
-    embed.add_field(name="🏷️ Vault File", value=f"`{dto.stored_filename}`", inline=True)
     embed.add_field(name="📦 Size", value=f"{size_kb} KB", inline=True)
+    embed.add_field(name="🏷️ Vault File", value=f"`{dto.stored_filename}`", inline=False)
+    if dto.notes:
+        embed.add_field(name="📝 Notes", value=dto.notes, inline=False)
     embed.add_field(name="🔐 SHA-256 Hash", value=f"```{dto.file_hash}```", inline=False)
-    embed.set_footer(text=f"Submitted by {user_name} • Integrity verified")
+    embed.set_footer(text="Submission verified • Contribution score updated")
     return embed
