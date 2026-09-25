@@ -94,5 +94,40 @@ class TestTaskEntity(unittest.TestCase):
         with self.assertRaises(ValidationError):
             task.extend_due_date(earlier_due)
 
+    def test_assignee_cannot_be_verifier(self):
+        with self.assertRaises(ValidationError):
+            make_task(assigned_to="user-123", verifier_id="user-123")
+
+    def test_task_verification_flow(self):
+        task = make_task(assigned_to="user-123", verifier_id="verifier-456")
+        self.assertFalse(task.is_completed)
+        self.assertFalse(task.needs_verification)
+        self.assertFalse(task.is_fully_verified)
+
+        # Cannot verify before completion
+        with self.assertRaises(ValidationError):
+            task.verify("verifier-456")
+
+        # Assignee completes
+        task.mark_completed()
+        self.assertTrue(task.is_completed)
+        self.assertTrue(task.needs_verification)
+        self.assertFalse(task.is_fully_verified)
+
+        # Unauthorized user cannot verify
+        with self.assertRaises(ValidationError):
+            task.verify("stranger-789")
+
+        # Designated verifier signs off
+        task.verify("verifier-456")
+        self.assertFalse(task.needs_verification)
+        self.assertTrue(task.is_fully_verified)
+        self.assertEqual(task.verified_by, "verifier-456")
+        self.assertIsNotNone(task.verified_at)
+
+        # Cannot verify again
+        with self.assertRaises(ValidationError):
+            task.verify("verifier-456")
+
 if __name__ == "__main__":
     unittest.main()

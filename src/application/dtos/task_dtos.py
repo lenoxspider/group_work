@@ -21,6 +21,7 @@ class CreateTaskDTO:
     due_date: datetime
     channel_id: Optional[str] = None
     message_id: Optional[str] = None
+    verifier_id: Optional[str] = None
 
 @dataclass(frozen=True)
 class TaskResultDTO:
@@ -37,6 +38,11 @@ class TaskResultDTO:
     is_completed: bool
     is_in_progress: bool = False
     is_on_time: Optional[bool] = None
+    verifier_id: Optional[str] = None
+    verified_at: Optional[datetime] = None
+    verified_by: Optional[str] = None
+    needs_verification: bool = False
+    is_fully_verified: bool = True
 
 @dataclass(frozen=True)
 class TaskReminderActionDTO:

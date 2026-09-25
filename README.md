@@ -18,28 +18,41 @@ This project strictly adheres to Domain-Driven Design (DDD) and Clean Architectu
 ## 🌟 Features
 
 ### 1. 📋 Task Ledger & Interactive Buttons
-- **Command**: `/task add description:<str> member:<@member> due:<YYYY-MM-DD [HH:MM]>`
+- **Command**: `/task add description:<str> member:<@member> due:<YYYY-MM-DD [HH:MM]> [verifier:<@buddy>]`
 - Formats and posts an interactive task card into the `#tasks` channel with persistent action buttons:
   - 🔔 **Nudge Button**: Allows teammates to ping the assignee with a built-in 30-minute spam-prevention cooldown.
   - 🔄 **In Progress Toggle**: Assignee or team admin can toggle work status between `⏳ Pending` and `🔄 In Progress`.
   - ⏳ **Extend Button**: Initiates a formal, team-voted extension request.
-  - ✅ **One-Click Complete**: Immediately finishes the task, records on-time delivery status, updates streaks, and disables buttons.
+  - ✅ **Complete Button**: Marks the task as submitted by assignee. If no buddy verifier was assigned, credits completion and streak immediately.
+  - 🔍 **Verify Button**: Accountability buddy signs off on deliverable completion, awarding completion to assignee and buddy verification bonus (`+1.0 pt`) to the verifier!
+- **Dual Ownership & Buddy Pairing**:
+  - Assign deliverables with `verifier:@teammate`. Two people own every deliverable.
+  - Assignee marks complete; status switches to `🔍 Awaiting Buddy Verification`.
+  - Designated verifier signs off via card button or `/task verify task_id:<TASK-ID>`.
 - **Escalating Reminders Ladder**:
-  - **Tier 1 (T-24h)**: Friendly DM reminder to the assignee.
+  - **Tier 1 (T-24h)**: Friendly DM reminder to the assignee (respects Quiet Hours).
   - **Tier 2 (T-6h)**: Escalation alert ping in `#tasks` notifying the team.
-  - **Tier 3 (T-1h)**: High-urgency DM reminder with countdown.
+  - **Tier 3 (T-1h)**: High-urgency DM reminder with countdown (respects Quiet Hours).
   - **Tier 4 (Overdue)**: Public shaming card posted to `#wall-of-shame`.
-- **Complete Task via Slash**: `/task complete task_id:<TASK-ID>` updates the embed and awards contribution points.
+- **Complete Task via Slash**: `/task complete task_id:<TASK-ID>` updates the embed.
+- **Verify Task via Slash**: `/task verify task_id:<TASK-ID>` signs off as designated verifier.
 - **List Tasks**: `/task list [member:<@member>]` lists open tasks across the project or for a specific teammate.
 
-### 2. 🗳️ Extension Requests with Democratic Majority Voting
+### 2. 🌙 Timezone & Quiet Hours (DND) Respect
+- **Commands**:
+  - `/timezone set timezone:<IANA>` (e.g. `America/New_York`, `UTC`, `Europe/London`, `Asia/Tokyo`)
+  - `/timezone quiet start_hour:<0-23> end_hour:<0-23>` (e.g. `start_hour:23 end_hour:8` for 11 PM to 8 AM)
+  - `/timezone view`: Inspect your active timezone, quiet hours window, and live DND status.
+- **DND Respect**: The background reminder loop checks each member's designated quiet hours in their local timezone before dispatching DM reminders. Pings are held until daylight hours so members aren't disturbed at 3am.
+
+### 3. 🗳️ Extension Requests with Democratic Majority Voting
 - **Command**: `/task extend task_id:<TASK-ID> new_due:<YYYY-MM-DD [HH:MM]> reason:<TEXT>`
 - Assignee requests extra time on an active deliverable, logging a transparent paper trail.
 - Posts an interactive voting card into `#tasks` with `👍 Approve`, `👎 Reject`, and `🏁 Conclude Vote` buttons (`ExtensionVoteView`).
 - **Quorum & Resolution**: Majority of votes cast decides the outcome. Requester cannot vote on their own request.
 - **Automatic Due Date Update**: When approved, the task's due date is updated, all reminder thresholds are reset, and the assignee's on-time streak remains intact!
 
-### 3. 🚨 Wall of Shame & On-Time Streaks
+### 4. 🚨 Wall of Shame & On-Time Streaks
 - **Channel**: `#wall-of-shame` (auto-provisioned with read-only display protection).
 - **Automated Overdue Detection**: Background loop scans every 2 minutes for delinquent tasks past their due date.
 - **Punishment & Shaming**: Automatically posts a public red shaming card pinging the delinquent member with elapsed overdue hours.

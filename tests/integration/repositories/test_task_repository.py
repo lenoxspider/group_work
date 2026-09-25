@@ -102,5 +102,29 @@ class TestSQLiteTaskRepository(unittest.IsolatedAsyncioTestCase):
         unshamed_after = await self.repo.get_overdue_unshamed(now)
         self.assertEqual(len(unshamed_after), 0)
 
+    async def test_save_and_retrieve_task_with_verifier(self):
+        now = datetime.now(timezone.utc)
+        task = Task(
+            task_id="TASK-T05",
+            guild_id="guild-100",
+            channel_id="chan-200",
+            message_id="msg-300",
+            description="Buddy verified deliverable",
+            assigned_to="user-400",
+            due_date=now + timedelta(days=2),
+            created_at=now,
+            verifier_id="user-buddy-500"
+        )
+        task.mark_completed()
+        task.verify("user-buddy-500", timestamp=now)
+        await self.repo.save(task)
+
+        retrieved = await self.repo.get_by_id("TASK-T05")
+        self.assertIsNotNone(retrieved)
+        self.assertEqual(retrieved.verifier_id, "user-buddy-500")
+        self.assertEqual(retrieved.verified_by, "user-buddy-500")
+        self.assertIsNotNone(retrieved.verified_at)
+        self.assertTrue(retrieved.is_fully_verified)
+
 if __name__ == "__main__":
     unittest.main()

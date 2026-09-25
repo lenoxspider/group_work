@@ -74,6 +74,43 @@ class TestTaskService(unittest.IsolatedAsyncioTestCase):
             overdue_task.guild_id, overdue_task.assigned_to
         )
 
+    async def test_complete_task_with_verifier_awaits_verification(self):
+        task = make_task(
+            task_id="TASK-VERIFY",
+            is_completed=False,
+            hours_from_now=5,
+            verifier_id="verifier-999"
+        )
+        self.mock_task_repo.get_by_id.return_value = task
+
+        result = await self.service.complete_task("TASK-VERIFY")
+        self.assertTrue(result.is_completed)
+        self.assertTrue(result.needs_verification)
+        # Should NOT credit activity repo until verified
+        self.mock_activity_repo.record_task_completed.assert_not_called()
+
+    async def test_verify_task_awards_completion_and_buddy_bonus(self):
+        task = make_task(
+            task_id="TASK-VERIFY",
+            is_completed=True,
+            hours_from_now=5,
+            verifier_id="verifier-999"
+        )
+        self.mock_task_repo.get_by_id.return_value = task
+
+        result = await self.service.verify_task("TASK-VERIFY", "verifier-999")
+        self.assertTrue(result.is_fully_verified)
+        self.assertFalse(result.needs_verification)
+        self.assertEqual(result.verified_by, "verifier-999")
+        # Assignee credited
+        self.mock_activity_repo.record_task_completed.assert_awaited_once_with(
+            task.guild_id, task.assigned_to, is_on_time=True
+        )
+        # Verifier awarded buddy bonus
+        self.mock_activity_repo.record_file_submission.assert_awaited_once_with(
+            task.guild_id, "verifier-999"
+        )
+
     async def test_complete_nonexistent_task_raises_not_found(self):
         self.mock_task_repo.get_by_id.return_value = None
         with self.assertRaises(NotFoundError):

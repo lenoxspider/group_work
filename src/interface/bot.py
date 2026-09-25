@@ -20,6 +20,7 @@ from src.infrastructure.database.deadline_sqlite_repo import SQLiteDeadlineRepos
 from src.infrastructure.database.activity_sqlite_repo import SQLiteActivityRepository
 from src.infrastructure.database.project_sqlite_repo import SQLiteProjectRepository
 from src.infrastructure.database.extension_sqlite_repo import SQLiteExtensionRepository
+from src.infrastructure.database.preference_sqlite_repo import SQLitePreferenceRepository
 from src.infrastructure.storage.local_file_vault import LocalFileVault
 
 from src.application.services.task_service import TaskService
@@ -28,12 +29,14 @@ from src.application.services.activity_service import ActivityService
 from src.application.services.vault_service import VaultService
 from src.application.services.project_service import ProjectService
 from src.application.services.extension_service import ExtensionService
+from src.application.services.preference_service import PreferenceService
 
 from src.interface.cogs.tasks_cog import TasksCog
 from src.interface.cogs.deadlines_cog import DeadlinesCog
 from src.interface.cogs.reports_cog import ReportsCog
 from src.interface.cogs.tracker_cog import TrackerCog
 from src.interface.cogs.admin_cog import AdminCog
+from src.interface.cogs.preference_cog import PreferenceCog
 
 logger = logging.getLogger("interface.bot")
 
@@ -61,6 +64,7 @@ class GroupAccountabilityBot(commands.Bot):
         self.activity_repo = SQLiteActivityRepository(settings.database_path)
         self.project_repo = SQLiteProjectRepository(settings.database_path)
         self.extension_repo = SQLiteExtensionRepository(settings.database_path)
+        self.preference_repo = SQLitePreferenceRepository(settings.database_path)
         self.file_vault = LocalFileVault(settings.uploads_dir)
 
         # Application Services
@@ -69,6 +73,7 @@ class GroupAccountabilityBot(commands.Bot):
         self.activity_service = ActivityService(self.activity_repo, self.task_repo)
         self.vault_service = VaultService(self.file_vault, self.activity_repo)
         self.extension_service = ExtensionService(self.extension_repo, self.task_repo)
+        self.preference_service = PreferenceService(self.preference_repo)
         self.project_service = ProjectService(
             self.project_repo,
             self.task_repo,
@@ -82,11 +87,12 @@ class GroupAccountabilityBot(commands.Bot):
         await self.db_manager.initialize_schema()
 
         # Mount Cogs with injected services
-        await self.add_cog(TasksCog(self, self.task_service, self.extension_service))
+        await self.add_cog(TasksCog(self, self.task_service, self.extension_service, self.preference_service))
         await self.add_cog(DeadlinesCog(self, self.deadline_service))
         await self.add_cog(ReportsCog(self, self.activity_service))
         await self.add_cog(TrackerCog(self, self.activity_service, self.vault_service))
         await self.add_cog(AdminCog(self, self.project_service))
+        await self.add_cog(PreferenceCog(self, self.preference_service))
         logger.info("All Cogs mounted successfully.")
 
         # Sync Slash Commands

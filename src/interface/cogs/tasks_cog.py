@@ -21,6 +21,7 @@ from src.application.dtos.task_dtos import CreateTaskDTO
 from src.application.dtos.extension_dtos import CreateExtensionDTO
 from src.application.services.task_service import TaskService
 from src.application.services.extension_service import ExtensionService
+from src.application.services.preference_service import PreferenceService
 from src.domain.errors import AppError
 from src.interface.cogs.task_buttons import TaskActionView
 from src.interface.cogs.extension_buttons import ExtensionVoteView
@@ -39,10 +40,17 @@ logger = logging.getLogger("interface.cogs.tasks")
 class TasksCog(commands.Cog, name="Task Ledger"):
     """Interface adapter for Task management commands, extension voting, and escalating reminders."""
 
-    def __init__(self, bot: commands.Bot, task_service: TaskService, extension_service: ExtensionService):
+    def __init__(
+        self,
+        bot: commands.Bot,
+        task_service: TaskService,
+        extension_service: ExtensionService,
+        preference_service: Optional[PreferenceService] = None
+    ):
         self.bot = bot
         self.service = task_service
         self.extension_service = extension_service
+        self.preference_service = preference_service
         self.bot.add_view(TaskActionView(task_service))
         self.bot.add_view(ExtensionVoteView(extension_service))
         self.reminder_loop.start()
@@ -68,14 +76,16 @@ class TasksCog(commands.Cog, name="Task Ledger"):
     @app_commands.describe(
         description="Deliverable description",
         member="Team member responsible",
-        due="Due date (YYYY-MM-DD or YYYY-MM-DD HH:MM)"
+        due="Due date (YYYY-MM-DD or YYYY-MM-DD HH:MM)",
+        verifier="Optional: accountability buddy who signs off on completion"
     )
     async def add_task(
         self,
         interaction: discord.Interaction,
         description: str,
         member: discord.Member,
-        due: str
+        due: str,
+        verifier: Optional[discord.Member] = None
     ):
         await interaction.response.defer()
         due_dt = self._parse_due_date(due)
@@ -99,7 +109,8 @@ class TasksCog(commands.Cog, name="Task Ledger"):
                 description=description,
                 assigned_to=str(member.id),
                 due_date=due_dt,
-                channel_id=channel_id
+                channel_id=channel_id,
+                verifier_id=str(verifier.id) if verifier else None
             )
             result = await self.service.create_task(dto)
 
@@ -129,6 +140,22 @@ class TasksCog(commands.Cog, name="Task Ledger"):
         await interaction.response.defer()
         try:
             result = await self.service.complete_task(task_id.strip().upper())
+            if result.needs_verification:
+                if result.channel_id and result.message_id:
+                    ch = self.bot.get_channel(int(result.channel_id))
+                    if ch:
+                        try:
+                            msg = await ch.fetch_message(int(result.message_id))
+                            await msg.edit(embed=build_task_embed(result))
+                        except Exception:
+                            pass
+                embed = build_task_embed(result)
+                await interaction.followup.send(
+                    content=f"📤 Task `{result.task_id}` submitted! Awaiting verification from buddy <@{result.verifier_id}> 🔍",
+                    embed=embed
+                )
+                return
+
             disabled_view = TaskActionView(self.service, is_completed=True)
             # Update ledger message if it exists
             if result.channel_id and result.message_id:
@@ -144,6 +171,32 @@ class TasksCog(commands.Cog, name="Task Ledger"):
             timing_str = " (on time ⚡)" if result.is_on_time else " (late ⚠️)"
             await interaction.followup.send(
                 content=f"🎉 Task `{result.task_id}` marked as completed{timing_str}!",
+                embed=embed,
+                view=disabled_view
+            )
+        except AppError as e:
+            await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
+
+    @task_group.command(name="verify", description="Sign off on a submitted deliverable as accountability buddy")
+    @app_commands.describe(task_id="The ID of the task to verify (e.g. TASK-A1B2)")
+    async def verify_task(self, interaction: discord.Interaction, task_id: str):
+        await interaction.response.defer()
+        try:
+            clean_id = task_id.strip().upper()
+            result = await self.service.verify_task(clean_id, str(interaction.user.id))
+            disabled_view = TaskActionView(self.service, is_completed=True)
+            if result.channel_id and result.message_id:
+                ch = self.bot.get_channel(int(result.channel_id))
+                if ch:
+                    try:
+                        msg = await ch.fetch_message(int(result.message_id))
+                        await msg.edit(embed=build_task_embed(result), view=disabled_view)
+                    except Exception:
+                        pass
+
+            embed = build_task_embed(result)
+            await interaction.followup.send(
+                content=f"✅ Task `{result.task_id}` verified by {interaction.user.mention}! Completion and buddy bonus recorded 🌟",
                 embed=embed,
                 view=disabled_view
             )
@@ -282,6 +335,12 @@ class TasksCog(commands.Cog, name="Task Ledger"):
                     continue
 
                 # Tier 1 (T-24h) & Tier 3 (T-1h): Direct Message
+                if self.preference_service:
+                    is_quiet = await self.preference_service.is_in_quiet_hours(act.guild_id, act.user_id, now)
+                    if is_quiet:
+                        logger.info("Suppressing DM reminder for user %s during quiet hours", act.user_id)
+                        continue
+
                 user = self.bot.get_user(int(act.user_id))
                 if not user:
                     try:

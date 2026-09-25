@@ -24,6 +24,7 @@ class SQLiteTaskRepository(TaskRepository):
 
     def _row_to_entity(self, row: Dict[str, Any]) -> Task:
         completed = datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None
+        verified = datetime.fromisoformat(row["verified_at"]) if row.get("verified_at") else None
         return Task(
             task_id=row["task_id"],
             guild_id=row["guild_id"],
@@ -38,18 +39,23 @@ class SQLiteTaskRepository(TaskRepository):
             reminded_6h=bool(row.get("reminded_6h", 0)),
             reminded_1h=bool(row["reminded_1h"]),
             is_in_progress=bool(row.get("is_in_progress", 0)),
-            shame_logged=bool(row.get("shame_logged", 0))
+            shame_logged=bool(row.get("shame_logged", 0)),
+            verifier_id=row.get("verifier_id"),
+            verified_at=verified,
+            verified_by=row.get("verified_by")
         )
 
     async def save(self, task: Task) -> None:
         completed_str = task.completed_at.isoformat() if task.completed_at else None
+        verified_str = task.verified_at.isoformat() if task.verified_at else None
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
                 INSERT INTO tasks (
                     task_id, guild_id, channel_id, message_id, description,
                     assigned_to, due_date, created_at, completed_at,
-                    reminded_24h, reminded_6h, reminded_1h, is_in_progress, shame_logged
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    reminded_24h, reminded_6h, reminded_1h, is_in_progress, shame_logged,
+                    verifier_id, verified_at, verified_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(task_id) DO UPDATE SET
                     channel_id = excluded.channel_id,
                     message_id = excluded.message_id,
@@ -61,14 +67,18 @@ class SQLiteTaskRepository(TaskRepository):
                     reminded_6h = excluded.reminded_6h,
                     reminded_1h = excluded.reminded_1h,
                     is_in_progress = excluded.is_in_progress,
-                    shame_logged = excluded.shame_logged
+                    shame_logged = excluded.shame_logged,
+                    verifier_id = excluded.verifier_id,
+                    verified_at = excluded.verified_at,
+                    verified_by = excluded.verified_by
             """, (
                 task.task_id, task.guild_id, task.channel_id, task.message_id,
                 task.description, task.assigned_to, task.due_date.isoformat(),
                 task.created_at.isoformat(), completed_str,
                 1 if task.reminded_24h else 0, 1 if task.reminded_6h else 0,
                 1 if task.reminded_1h else 0, 1 if task.is_in_progress else 0,
-                1 if task.shame_logged else 0
+                1 if task.shame_logged else 0,
+                task.verifier_id, verified_str, task.verified_by
             ))
             await db.commit()
 

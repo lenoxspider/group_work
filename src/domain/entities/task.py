@@ -33,6 +33,9 @@ class Task:
     reminded_1h: bool = False
     is_in_progress: bool = False
     shame_logged: bool = False
+    verifier_id: Optional[str] = None
+    verified_at: Optional[datetime] = None
+    verified_by: Optional[str] = None
 
     def __post_init__(self):
         if not self.task_id.strip():
@@ -41,11 +44,23 @@ class Task:
             raise ValidationError("Task description cannot be empty.")
         if not self.assigned_to.strip():
             raise ValidationError("Assignee ID cannot be empty.")
+        if self.verifier_id and str(self.verifier_id).strip() == str(self.assigned_to).strip():
+            raise ValidationError("Accountability buddy / verifier cannot be the assignee themselves.")
 
     @property
     def is_completed(self) -> bool:
-        """Indicates whether the task has been marked complete."""
+        """Indicates whether the task has been marked complete by the assignee."""
         return self.completed_at is not None
+
+    @property
+    def needs_verification(self) -> bool:
+        """Indicates if task is completed but awaiting accountability buddy sign-off."""
+        return self.is_completed and self.verifier_id is not None and self.verified_at is None
+
+    @property
+    def is_fully_verified(self) -> bool:
+        """Indicates if task is completed and verified (or no verification needed)."""
+        return self.is_completed and (self.verifier_id is None or self.verified_at is not None)
 
     @property
     def is_on_time(self) -> Optional[bool]:
@@ -63,6 +78,20 @@ class Task:
         if self.is_completed:
             raise TaskAlreadyCompletedError(f"Cannot change progress state on completed task {self.task_id}.")
         self.is_in_progress = in_progress
+
+    def verify(self, verifier_user_id: str, timestamp: Optional[datetime] = None) -> None:
+        """
+        Signs off on deliverable completion as the designated accountability buddy.
+        """
+        if not self.is_completed:
+            raise ValidationError(f"Cannot verify task {self.task_id} before it is completed by the assignee.")
+        if self.verified_at is not None:
+            raise ValidationError(f"Task {self.task_id} has already been verified.")
+        if self.verifier_id and str(verifier_user_id) != str(self.verifier_id):
+            raise ValidationError(f"Only the designated verifier (<@{self.verifier_id}>) can sign off.")
+
+        self.verified_by = str(verifier_user_id)
+        self.verified_at = timestamp or datetime.now(timezone.utc)
 
     def extend_due_date(self, new_due_date: datetime) -> None:
         """Extends task deadline and resets reminder thresholds."""

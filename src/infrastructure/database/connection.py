@@ -37,9 +37,13 @@ class DatabaseManager:
                     created_at TEXT NOT NULL,
                     completed_at TEXT NULL,
                     reminded_24h INTEGER DEFAULT 0,
+                    reminded_6h INTEGER DEFAULT 0,
                     reminded_1h INTEGER DEFAULT 0,
                     is_in_progress INTEGER DEFAULT 0,
-                    shame_logged INTEGER DEFAULT 0
+                    shame_logged INTEGER DEFAULT 0,
+                    verifier_id TEXT,
+                    verified_at TEXT,
+                    verified_by TEXT
                 )
             """)
 
@@ -117,11 +121,27 @@ class DatabaseManager:
                 )
             """)
 
+            # 7. Member preferences table (timezone & quiet hours)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS member_preferences (
+                    guild_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    timezone_name TEXT NOT NULL DEFAULT 'UTC',
+                    quiet_hours_start INTEGER DEFAULT 23,
+                    quiet_hours_end INTEGER DEFAULT 8,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (guild_id, user_id)
+                )
+            """)
+
             # Migrations for existing databases
             migrations = [
                 ("tasks", "reminded_6h", "INTEGER DEFAULT 0"),
                 ("tasks", "is_in_progress", "INTEGER DEFAULT 0"),
                 ("tasks", "shame_logged", "INTEGER DEFAULT 0"),
+                ("tasks", "verifier_id", "TEXT"),
+                ("tasks", "verified_at", "TEXT"),
+                ("tasks", "verified_by", "TEXT"),
                 ("member_activity", "on_time_tasks", "INTEGER DEFAULT 0"),
                 ("member_activity", "current_streak", "INTEGER DEFAULT 0"),
                 ("member_activity", "best_streak", "INTEGER DEFAULT 0"),

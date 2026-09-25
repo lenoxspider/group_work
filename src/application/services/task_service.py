@@ -48,11 +48,16 @@ class TaskService:
             completed_at=task.completed_at,
             is_completed=task.is_completed,
             is_in_progress=task.is_in_progress,
-            is_on_time=task.is_on_time
+            is_on_time=task.is_on_time,
+            verifier_id=task.verifier_id,
+            verified_at=task.verified_at,
+            verified_by=task.verified_by,
+            needs_verification=task.needs_verification,
+            is_fully_verified=task.is_fully_verified
         )
 
     async def create_task(self, dto: CreateTaskDTO) -> TaskResultDTO:
-        """Creates and stores a new Task aggregate."""
+        """Creates and stores a new Task aggregate with optional accountability buddy."""
         now = datetime.now(timezone.utc)
         if dto.due_date <= now:
             raise ValidationError("Task due date must be in the future.")
@@ -65,7 +70,8 @@ class TaskService:
             description=dto.description,
             assigned_to=dto.assigned_to,
             due_date=dto.due_date,
-            created_at=now
+            created_at=now,
+            verifier_id=dto.verifier_id
         )
         await self._task_repo.save(task)
         return self._map_to_dto(task)
@@ -79,7 +85,7 @@ class TaskService:
         await self._task_repo.save(task)
 
     async def complete_task(self, task_id: str) -> TaskResultDTO:
-        """Marks a task completed and updates member activity stats."""
+        """Marks a task completed. If no verifier assigned, credits points immediately."""
         task = await self._task_repo.get_by_id(task_id)
         if not task:
             raise NotFoundError(f"Task with ID {task_id} not found.")
@@ -87,7 +93,26 @@ class TaskService:
         task.mark_completed()
         is_on_time = bool(task.is_on_time)
         await self._task_repo.save(task)
+
+        # If no buddy verification required, award activity score & streak immediately
+        if not task.verifier_id:
+            await self._activity_repo.record_task_completed(task.guild_id, task.assigned_to, is_on_time=is_on_time)
+        return self._map_to_dto(task)
+
+    async def verify_task(self, task_id: str, verifier_user_id: str) -> TaskResultDTO:
+        """Signs off on a completed task as accountability buddy, crediting both members."""
+        task = await self._task_repo.get_by_id(task_id)
+        if not task:
+            raise NotFoundError(f"Task with ID {task_id} not found.")
+
+        task.verify(verifier_user_id)
+        is_on_time = bool(task.is_on_time)
+        await self._task_repo.save(task)
+
+        # Credit assignee's task completion and streak
         await self._activity_repo.record_task_completed(task.guild_id, task.assigned_to, is_on_time=is_on_time)
+        # Award buddy verification bonus to the verifier
+        await self._activity_repo.record_file_submission(task.guild_id, verifier_user_id)
         return self._map_to_dto(task)
 
     async def toggle_in_progress(self, task_id: str) -> TaskResultDTO:

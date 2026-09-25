@@ -162,14 +162,74 @@ class TaskActionView(discord.ui.View):
                 return
 
             result_dto = await self.service.complete_task(task_id)
+            if result_dto.needs_verification:
+                await interaction.message.edit(embed=build_task_embed(result_dto))
+                await interaction.channel.send(
+                    f"📤 Task `{result_dto.task_id}` submitted by {interaction.user.mention}! "
+                    f"Awaiting verification from buddy <@{result_dto.verifier_id}> 🔍"
+                )
+                await interaction.followup.send(
+                    f"✅ Task `{result_dto.task_id}` submitted! Waiting on buddy sign-off.",
+                    ephemeral=True
+                )
+            else:
+                disabled_view = TaskActionView(self.service, is_completed=True)
+                await interaction.message.edit(embed=build_task_embed(result_dto), view=disabled_view)
+
+                timing = "on time ⚡" if result_dto.is_on_time else "late ⚠️"
+                await interaction.channel.send(
+                    f"🎉 Task `{result_dto.task_id}` marked completed by {interaction.user.mention} ({timing})!"
+                )
+                await interaction.followup.send(f"✅ Marked task `{result_dto.task_id}` completed!", ephemeral=True)
+        except AppError as e:
+            await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
+
+    @discord.ui.button(
+        label="Verify",
+        style=discord.ButtonStyle.secondary,
+        emoji="🔍",
+        custom_id="task_action_btn:verify"
+    )
+    async def verify_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        task_id = self._extract_task_id(interaction.message)
+        if not task_id:
+            await interaction.followup.send("❌ Could not identify task ID from card.", ephemeral=True)
+            return
+
+        try:
+            task = await self.service.get_task(task_id)
+            if not task.is_completed:
+                await interaction.followup.send(
+                    "⏳ This task has not yet been marked completed by the assignee.",
+                    ephemeral=True
+                )
+                return
+
+            if not task.needs_verification:
+                await interaction.followup.send("✨ Task is already verified!", ephemeral=True)
+                return
+
+            is_admin = False
+            if isinstance(interaction.user, discord.Member):
+                is_admin = interaction.user.guild_permissions.administrator
+
+            if str(interaction.user.id) != str(task.verifier_id) and not is_admin:
+                await interaction.followup.send(
+                    f"❌ Only the designated accountability buddy (<@{task.verifier_id}>) or an admin can verify this task.",
+                    ephemeral=True
+                )
+                return
+
+            result_dto = await self.service.verify_task(task_id, str(interaction.user.id))
             disabled_view = TaskActionView(self.service, is_completed=True)
             await interaction.message.edit(embed=build_task_embed(result_dto), view=disabled_view)
 
-            timing = "on time ⚡" if result_dto.is_on_time else "late ⚠️"
             await interaction.channel.send(
-                f"🎉 Task `{result_dto.task_id}` marked completed by {interaction.user.mention} ({timing})!"
+                f"✅ Deliverable for `{result_dto.task_id}` verified by {interaction.user.mention}! "
+                f"<@{result_dto.assigned_to}> receives completion credit, and verifier receives buddy bonus 🌟"
             )
-            await interaction.followup.send(f"✅ Marked task `{result_dto.task_id}` completed!", ephemeral=True)
+            await interaction.followup.send(f"✅ Successfully verified task `{result_dto.task_id}`!", ephemeral=True)
         except AppError as e:
             await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
 

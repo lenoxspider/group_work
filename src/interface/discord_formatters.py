@@ -19,6 +19,7 @@ from src.application.dtos.deadline_dtos import DeadlineResultDTO
 from src.application.dtos.report_dtos import MemberReportDTO, GuildReportDTO
 from src.application.dtos.project_dtos import ProjectStatusDTO, ProjectArchiveSummaryDTO
 from src.application.dtos.extension_dtos import ExtensionResultDTO
+from src.application.dtos.preference_dtos import MemberPreferenceDTO
 from src.application.services.vault_service import VaultSubmissionResultDTO
 
 COLOR_PRIMARY = discord.Color.from_rgb(88, 101, 242)
@@ -36,10 +37,18 @@ def build_task_embed(dto: TaskResultDTO) -> discord.Embed:
     """Builds a formatted task ledger embed card."""
     abs_ts, rel_ts = format_discord_timestamps(dto.due_date)
     if dto.is_completed:
-        color = COLOR_SUCCESS
-        title = f"✅ Task: {dto.task_id}"
-        timing_badge = " (On-Time ⚡)" if dto.is_on_time else " (Late ⚠️)"
-        status_text = f"Completed at {dto.completed_at}{timing_badge}"
+        if dto.needs_verification:
+            color = COLOR_WARNING
+            title = f"🔍 Task: {dto.task_id} (Awaiting Sign-off)"
+            status_text = f"Submitted by <@{dto.assigned_to}> • Pending Buddy Verification"
+        else:
+            color = COLOR_SUCCESS
+            title = f"✅ Task: {dto.task_id}"
+            timing_badge = " (On-Time ⚡)" if dto.is_on_time else " (Late ⚠️)"
+            if dto.verified_by:
+                status_text = f"Verified Complete by <@{dto.verified_by}> at {dto.completed_at}{timing_badge}"
+            else:
+                status_text = f"Completed at {dto.completed_at}{timing_badge}"
     elif dto.is_in_progress:
         color = COLOR_WARNING
         title = f"🔄 Task: {dto.task_id}"
@@ -56,10 +65,31 @@ def build_task_embed(dto: TaskResultDTO) -> discord.Embed:
         timestamp=datetime.now(timezone.utc)
     )
     embed.add_field(name="👤 Assignee", value=f"<@{dto.assigned_to}>", inline=True)
+    if dto.verifier_id:
+        embed.add_field(name="🔍 Accountability Buddy", value=f"<@{dto.verifier_id}>", inline=True)
     embed.add_field(name="📌 Status", value=f"`{status_text}`", inline=True)
     embed.add_field(name="⏰ Due Date", value=f"{abs_ts} ({rel_ts})", inline=False)
-    footer = "Task completed" if dto.is_completed else f"Task ID: {dto.task_id} • Use buttons below or /task complete"
+    if dto.needs_verification:
+        footer = f"Task ID: {dto.task_id} • Awaiting verifier sign-off via button or /task verify"
+    elif dto.is_completed:
+        footer = "Task completed"
+    else:
+        footer = f"Task ID: {dto.task_id} • Use buttons below or /task complete"
     embed.set_footer(text=footer)
+    return embed
+
+def build_preference_embed(dto: MemberPreferenceDTO, member: discord.Member) -> discord.Embed:
+    """Builds a settings card for student timezone and quiet hours."""
+    embed = discord.Embed(
+        title=f"⚙️ Notification Preferences: {member.display_name}",
+        color=COLOR_PRIMARY,
+        timestamp=datetime.now(timezone.utc)
+    )
+    quiet_status = "🌙 Active Now (DND)" if dto.is_currently_quiet else "☀️ Awake (Pings allowed)"
+    embed.add_field(name="🌐 Timezone", value=f"`{dto.timezone_name}`", inline=True)
+    embed.add_field(name="🌙 Quiet Hours Window", value=f"`{dto.quiet_hours_start:02d}:00` to `{dto.quiet_hours_end:02d}:00`", inline=True)
+    embed.add_field(name="📡 Current Status", value=quiet_status, inline=False)
+    embed.set_footer(text="Bot will hold DM reminders during quiet hours.")
     return embed
 
 def build_deadline_embed(dto: DeadlineResultDTO) -> discord.Embed:

@@ -17,7 +17,8 @@ def make_task(
     description: str = "Sample deliverable",
     hours_from_now: int = 48,
     is_completed: bool = False,
-    is_in_progress: bool = False
+    is_in_progress: bool = False,
+    verifier_id: Optional[str] = None
 ) -> Task:
     now = datetime.now(timezone.utc)
     completed_at = now if is_completed else None
@@ -31,7 +32,8 @@ def make_task(
         due_date=now + timedelta(hours=hours_from_now),
         created_at=now,
         completed_at=completed_at,
-        is_in_progress=is_in_progress
+        is_in_progress=is_in_progress,
+        verifier_id=verifier_id
     )
 
 def make_deadline(
