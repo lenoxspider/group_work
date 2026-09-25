@@ -144,6 +144,14 @@ class SquidService:
         game = self._active_games.get(guild_id)
         return game["light"] if game else "NONE"
 
+    def get_active_game(self, guild_id: str) -> Optional[dict]:
+        """Returns read-only copy of active game state."""
+        return self._active_games.get(guild_id)
+
+    def end_red_light_game(self, guild_id: str) -> None:
+        """Terminates active session for guild."""
+        self._active_games.pop(guild_id, None)
+
     async def process_move(self, dto: RedLightMoveDTO) -> RedLightMoveResultDTO:
         """Evaluates a /move attempt by an enrolled player."""
         game = self._active_games.get(dto.guild_id)
