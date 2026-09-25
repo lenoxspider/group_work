@@ -22,6 +22,7 @@ from src.application.dtos.deadline_dtos import CreateDeadlineDTO
 from src.application.dtos.voice_dtos import SynthesizeRequestDTO
 from src.application.services.deadline_service import DeadlineService
 from src.application.services.voice_service import VoiceService
+from src.interface.channel_router import ChannelRouter
 from src.domain.errors import AppError
 from src.interface.discord_formatters import (
     build_deadline_embed,
@@ -40,10 +41,12 @@ class DeadlinesCog(commands.Cog, name="Milestones"):
         self,
         bot: commands.Bot,
         deadline_service: DeadlineService,
+        channel_router: Optional[ChannelRouter] = None,
         voice_service: Optional[VoiceService] = None
     ):
         self.bot = bot
         self.service = deadline_service
+        self.channel_router = channel_router
         self.voice_service = voice_service
         self.countdown_loop.start()
 
@@ -84,7 +87,7 @@ class DeadlinesCog(commands.Cog, name="Milestones"):
             await interaction.followup.send("❌ Must be executed in a server.", ephemeral=True)
             return
 
-        deadlines_ch = discord.utils.get(guild.text_channels, name="deadlines")
+        deadlines_ch = await self.channel_router.get(guild, "deadlines") if self.channel_router else discord.utils.get(guild.text_channels, name="deadlines")
         if not deadlines_ch:
             await interaction.followup.send(
                 "❌ `#deadlines` channel not found. Please run `/setup` first.",

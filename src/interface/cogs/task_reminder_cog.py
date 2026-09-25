@@ -29,6 +29,9 @@ from src.interface.discord_formatters import (
     COLOR_WARNING,
     COLOR_DANGER
 )
+from src.interface.channel_router import ChannelRouter
+from src.domain.interfaces.alert_fire_repository import AlertFireRepository
+from src.domain.entities.alert_fire import AlertFire
 from src.interface.squid_formatters import build_squid_elimination_embed
 
 logger = logging.getLogger("interface.cogs.task_reminders")
@@ -40,12 +43,16 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
         self,
         bot: commands.Bot,
         task_service: TaskService,
+        channel_router: ChannelRouter,
+        alert_fire_repo: AlertFireRepository,
         preference_service: Optional[PreferenceService] = None,
         voice_service: Optional[VoiceService] = None,
         squid_service: Optional[SquidService] = None
     ):
         self.bot = bot
         self.service = task_service
+        self.channel_router = channel_router
+        self.alert_fire_repo = alert_fire_repo
         self.preference_service = preference_service
         self.voice_service = voice_service
         self.squid_service = squid_service
@@ -73,7 +80,15 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
                 if not guild:
                     continue
 
-                shame_ch = discord.utils.get(guild.text_channels, name="wall-of-shame")
+                # Idempotency check for DELINQUENT penalty
+                raw_id = int(act.task_id.split("-")[-1]) if "-" in act.task_id else int(act.task_id)
+                fire_record = AlertFire(task_id=raw_id, alert_tier="DELINQUENT", fired_at=now)
+                first_fire = await self.alert_fire_repo.record_fire(fire_record)
+                if not first_fire:
+                    continue
+
+                shame_ch = await self.channel_router.get(guild, "wall-of-shame")
+                allowed_mentions = discord.AllowedMentions(users=True, roles=False, everyone=False)
                 if shame_ch:
                     embed = build_wall_of_shame_embed(act)
                     v_script = self.voice_service.generate_task_reminder_script(
@@ -81,7 +96,12 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
                     ) if self.voice_service else ""
                     v_file = await self._try_generate_voice_file(v_script, act.user_id) if v_script else None
                     try:
-                        await shame_ch.send(content=f"🚨 **WALL OF SHAME ALERT:** <@{act.user_id}>", embed=embed, file=v_file)
+                        await shame_ch.send(
+                            content=f"🚨 **WALL OF SHAME ALERT:** <@{act.user_id}>",
+                            embed=embed,
+                            file=v_file,
+                            allowed_mentions=allowed_mentions
+                        )
                     except Exception as e:
                         logger.warning("Could not post to #wall-of-shame in guild %s: %s", guild.id, e)
 
@@ -94,7 +114,20 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
                             act.user_id,
                             reason=f"Task {act.task_id} overdue by {act.hours_overdue}h"
                         )
-                        game_hub = discord.utils.get(guild.text_channels, name="game-hub") or shame_ch
+                        # Atomic role swap to Spectator
+                        try:
+                            member = guild.get_member(int(act.user_id))
+                            if member:
+                                p_role = discord.utils.get(guild.roles, name="Player")
+                                s_role = discord.utils.get(guild.roles, name="Spectator")
+                                if p_role and p_role in member.roles:
+                                    await member.remove_roles(p_role, reason="Eliminated for overdue task")
+                                if s_role and s_role not in member.roles:
+                                    await member.add_roles(s_role, reason="Moved to Spectator deck")
+                        except Exception as e:
+                            logger.warning("Could not swap role on overdue elimination: %s", e)
+
+                        game_hub = await self.channel_router.get(guild, "game-hub") or shame_ch
                         if game_hub:
                             squid_embed = build_squid_elimination_embed(elim)
                             s_file = discord.File(io.BytesIO(elim.audio_bytes), filename="elimination.wav") if elim.audio_bytes else None
@@ -102,7 +135,8 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
                                 await game_hub.send(
                                     content=f"💀 **SQUID GAME ELIMINATION:** <@{act.user_id}> has been terminated for missing task {act.task_id}!",
                                     embed=squid_embed,
-                                    file=s_file
+                                    file=s_file,
+                                    allowed_mentions=allowed_mentions
                                 )
                             except Exception as e:
                                 logger.warning("Could not dispatch Squid Game elimination notice: %s", e)
@@ -113,18 +147,25 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
 
     @tasks.loop(minutes=2)
     async def reminder_loop(self):
-        """Dispatches automated escalating reminders and posts overdue items to the Wall of Shame."""
+        """Dispatches automated escalating reminders with persistent idempotency."""
         try:
             now = datetime.now(timezone.utc)
             actions = await self.service.evaluate_pending_reminders(now)
             for act in actions:
+                # Idempotency check: prevent duplicate reminders on reboot
+                raw_id = int(act.task_id.split("-")[-1]) if "-" in act.task_id else int(act.task_id)
+                fire_record = AlertFire(task_id=raw_id, alert_tier=act.reminder_tier, fired_at=now)
+                first_fire = await self.alert_fire_repo.record_fire(fire_record)
+                if not first_fire:
+                    continue
+
                 abs_ts, rel_ts = format_discord_timestamps(act.due_date)
 
                 # Tier 2 (T-6h): Channel Escalation Ping
                 if act.reminder_tier == "6h":
                     guild = self.bot.get_guild(int(act.guild_id))
                     if guild:
-                        tasks_ch = discord.utils.get(guild.text_channels, name="tasks")
+                        tasks_ch = await self.channel_router.get(guild, "tasks")
                         if tasks_ch:
                             embed = discord.Embed(
                                 title=f"⚠️ Escalation Alert (T-6h): {act.task_id}",

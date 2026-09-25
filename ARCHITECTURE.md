@@ -47,7 +47,9 @@ discord_group_work/
 │   │   │   ├── squid_player.py      # SquidPlayer aggregate: vital status, player numbers (001-456), streaks
 │   │   │   ├── squid_season.py      # SquidSeason aggregate: piggy bank pot calculation, bounty increments
 │   │   │   ├── guard_voice.py       # Masked guard & doll speech scripts, vocal profiles
-│   │   │   └── movement_anomaly.py  # MovementAnomaly value object: anti-cheat audit trails & latency grace tracking
+│   │   │   ├── movement_anomaly.py  # MovementAnomaly value object: anti-cheat audit trails & latency grace tracking
+│   │   │   ├── channel_binding.py   # ChannelBinding value object: persistent guild channel snowflake ID mapping
+│   │   │   └── alert_fire.py        # AlertFire value object: idempotent notification tracking across restarts
 │   │   └── interfaces/
 │   │       ├── __init__.py
 │   │       ├── task_repository.py   # TaskRepository abstract protocol/interface
@@ -56,7 +58,9 @@ discord_group_work/
 │   │       ├── preference_repository.py# PreferenceRepository abstract protocol/interface
 │   │       ├── project_repository.py # ProjectRepository abstract protocol/interface
 │   │       ├── extension_repository.py# ExtensionRepository abstract protocol/interface
-│   │       └── vault_storage.py     # VaultStorage abstract protocol/interface
+│   │       ├── vault_storage.py     # VaultStorage abstract protocol/interface
+│   │       ├── channel_binding_repository.py # ChannelBindingRepository abstract protocol
+│   │       └── alert_fire_repository.py # AlertFireRepository abstract protocol
 │   │
 │   ├── application/                 # USE CASES: Orchestration, DTOs
 │   │   ├── __init__.py
@@ -91,7 +95,9 @@ discord_group_work/
 │   │   │   ├── preference_sqlite_repo.py# SQLite implementation of PreferenceRepository
 │   │   │   ├── project_sqlite_repo.py # SQLite implementation of ProjectRepository
 │   │   │   ├── extension_sqlite_repo.py# SQLite implementation of ExtensionRepository
-│   │   │   └── squid_sqlite_repo.py # SQLite implementation of SquidRepository (players, season, games)
+│   │   │   ├── squid_sqlite_repo.py # SQLite implementation of SquidRepository (players, season, games)
+│   │   │   ├── channel_binding_sqlite_repo.py # SQLite implementation of ChannelBindingRepository
+│   │   │   └── alert_fire_sqlite_repo.py # SQLite implementation of AlertFireRepository
 │   │   ├── storage/
 │   │   │   ├── __init__.py
 │   │   │   └── local_file_vault.py  # Local filesystem implementation of VaultStorage
@@ -104,6 +110,7 @@ discord_group_work/
 │   └── interface/                   # ENTRY POINTS: Discord Cogs, Embeds, Client
 │       ├── __init__.py
 │       ├── bot.py                   # GroupAccountabilityBot Discord client subclass
+│       ├── channel_router.py        # Centralized 4-tier channel resolver & emergency fallback logger
 │       ├── discord_formatters.py    # Discord Embed card formatters (Hot Pink #FF0090 Squid styling)
 │       └── cogs/
 │           ├── __init__.py
@@ -112,7 +119,8 @@ discord_group_work/
 │           ├── tasks_cog.py         # /task commands, buddy verification, escalation, voice nudges & Wall of Shame loop
 │           ├── preference_cog.py    # /timezone commands (set, quiet, view)
 │           ├── voice_cog.py         # /say command (arbitrary speech with tone/language flags)
-│           ├── squid_cog.py         # /squid (join, status, announce, eliminate, redlight), /move command
+│           ├── squid_cog.py         # /squid (join, status, announce, eliminate, reset, redlight)
+│           ├── move_command_cog.py  # /move command (rate limited, latency grace, ephemeral feedback)
 │           ├── deadlines_cog.py     # /deadline add, /deadline list, 15m countdown update loop & voice alerts
 │           ├── reports_cog.py       # /report (team leaderboard, military ranks, on-time streaks & voice briefing)
 │           ├── tracker_cog.py       # on_message counting & in-server /submit deliverable receiver

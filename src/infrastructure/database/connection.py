@@ -168,6 +168,27 @@ class DatabaseManager:
                 )
             """)
 
+            # 11. Channel bindings table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS channel_bindings (
+                    guild_id TEXT NOT NULL,
+                    channel_key TEXT NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (guild_id, channel_key)
+                )
+            """)
+
+            # 12. Alert fires table (idempotent notifications)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS alert_fires (
+                    task_id INTEGER NOT NULL,
+                    alert_tier TEXT NOT NULL,
+                    fired_at TEXT NOT NULL,
+                    PRIMARY KEY (task_id, alert_tier)
+                )
+            """)
+
             # Migrations for existing databases
             migrations = [
                 ("tasks", "reminded_6h", "INTEGER DEFAULT 0"),

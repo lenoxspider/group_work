@@ -23,6 +23,8 @@ from src.infrastructure.database.project_sqlite_repo import SQLiteProjectReposit
 from src.infrastructure.database.extension_sqlite_repo import SQLiteExtensionRepository
 from src.infrastructure.database.preference_sqlite_repo import SQLitePreferenceRepository
 from src.infrastructure.database.squid_sqlite_repo import SquidSqliteRepository
+from src.infrastructure.database.channel_binding_sqlite_repo import SQLiteChannelBindingRepository
+from src.infrastructure.database.alert_fire_sqlite_repo import SQLiteAlertFireRepository
 from src.infrastructure.storage.local_file_vault import LocalFileVault
 from src.infrastructure.speech.espeak_synthesizer import EspeakSpeechSynthesizer
 from src.infrastructure.speech.attachment_deliverer import AttachmentAudioDeliverer
@@ -36,6 +38,7 @@ from src.application.services.extension_service import ExtensionService
 from src.application.services.preference_service import PreferenceService
 from src.application.services.voice_service import VoiceService
 from src.application.services.squid_service import SquidService
+from src.interface.channel_router import ChannelRouter
 
 from src.interface.cogs.tasks_cog import TasksCog
 from src.interface.cogs.task_reminder_cog import TaskReminderCog
@@ -45,7 +48,8 @@ from src.interface.cogs.tracker_cog import TrackerCog
 from src.interface.cogs.admin_cog import AdminCog
 from src.interface.cogs.preference_cog import PreferenceCog
 from src.interface.cogs.voice_cog import VoiceCog
-from src.interface.cogs.squid_cog import SquidCog, MoveCommandCog
+from src.interface.cogs.squid_cog import SquidCog
+from src.interface.cogs.move_command_cog import MoveCommandCog
 
 logger = logging.getLogger("interface.bot")
 
@@ -74,9 +78,12 @@ class GroupAccountabilityBot(commands.Bot):
         self.extension_repo = SQLiteExtensionRepository(settings.database_path)
         self.preference_repo = SQLitePreferenceRepository(settings.database_path)
         self.squid_repo = SquidSqliteRepository(settings.database_path)
+        self.channel_binding_repo = SQLiteChannelBindingRepository(settings.database_path)
+        self.alert_fire_repo = SQLiteAlertFireRepository(settings.database_path)
         self.file_vault = LocalFileVault(settings.uploads_dir)
 
-        # Application Services
+        # Routers & Application Services
+        self.channel_router = ChannelRouter(self, self.channel_binding_repo)
         self.task_service = TaskService(self.task_repo, self.activity_repo)
         self.deadline_service = DeadlineService(self.deadline_repo)
         self.activity_service = ActivityService(self.activity_repo, self.task_repo)
@@ -105,15 +112,15 @@ class GroupAccountabilityBot(commands.Bot):
 
         # Mount Cogs with injected services
         await self.add_cog(TasksCog(
-            self, self.task_service, self.extension_service, self.preference_service, self.voice_service
+            self, self.task_service, self.extension_service, self.channel_router, self.preference_service, self.voice_service
         ))
         await self.add_cog(TaskReminderCog(
-            self, self.task_service, self.preference_service, self.voice_service, self.squid_service
+            self, self.task_service, self.channel_router, self.alert_fire_repo, self.preference_service, self.voice_service, self.squid_service
         ))
-        await self.add_cog(DeadlinesCog(self, self.deadline_service, self.voice_service))
+        await self.add_cog(DeadlinesCog(self, self.deadline_service, self.channel_router, self.voice_service))
         await self.add_cog(ReportsCog(self, self.activity_service, self.voice_service))
-        await self.add_cog(TrackerCog(self, self.activity_service, self.vault_service))
-        await self.add_cog(AdminCog(self, self.project_service))
+        await self.add_cog(TrackerCog(self, self.activity_service, self.vault_service, self.channel_router))
+        await self.add_cog(AdminCog(self, self.project_service, self.channel_router))
         await self.add_cog(PreferenceCog(self, self.preference_service))
         if self.voice_service and self.audio_deliverer:
             await self.add_cog(VoiceCog(self, self.voice_service, self.audio_deliverer))

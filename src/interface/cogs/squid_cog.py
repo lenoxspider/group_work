@@ -53,6 +53,39 @@ class SquidCog(commands.GroupCog, group_name="squid"):
         for task in self._running_tasks.values():
             task.cancel()
 
+    async def _swap_to_spectator(self, guild: discord.Guild, user_id: str) -> None:
+        """Atomically removes Player role and grants Spectator role."""
+        try:
+            member = guild.get_member(int(user_id))
+            if not member:
+                return
+            p_role = discord.utils.get(guild.roles, name="Player")
+            s_role = discord.utils.get(guild.roles, name="Spectator")
+            if p_role and p_role in member.roles:
+                await member.remove_roles(p_role, reason="Eliminated in Squid Game")
+            if s_role and s_role not in member.roles:
+                await member.add_roles(s_role, reason="Moved to Spectator deck")
+        except Exception as e:
+            logger.warning("Could not swap role to Spectator for user %s: %s", user_id, e)
+
+    async def _revive_roles(self, guild: discord.Guild) -> None:
+        """Restores Player role and removes Spectator role for all enrolled contestants."""
+        p_role = discord.utils.get(guild.roles, name="Player")
+        s_role = discord.utils.get(guild.roles, name="Spectator")
+        if not p_role:
+            return
+        players = await self.squid_service.squid_repo.list_players(str(guild.id))
+        for p in players:
+            try:
+                member = guild.get_member(int(p.user_id))
+                if member:
+                    if s_role and s_role in member.roles:
+                        await member.remove_roles(s_role, reason="Squid Game revive")
+                    if p_role and p_role not in member.roles:
+                        await member.add_roles(p_role, reason="Squid Game revive")
+            except Exception:
+                pass
+
     @app_commands.command(name="join", description="Enroll in the Squid Game accountability roster and receive a player number")
     async def join(self, interaction: discord.Interaction):
         try:
@@ -63,6 +96,14 @@ class SquidCog(commands.GroupCog, group_name="squid"):
         dto = EnrollPlayerDTO(guild_id=str(interaction.guild_id), user_id=str(interaction.user.id))
         try:
             result = await self.squid_service.enroll_player(dto)
+            if interaction.guild and isinstance(interaction.user, discord.Member):
+                p_role = discord.utils.get(interaction.guild.roles, name="Player")
+                s_role = discord.utils.get(interaction.guild.roles, name="Spectator")
+                if s_role and s_role in interaction.user.roles:
+                    await interaction.user.remove_roles(s_role)
+                if p_role and p_role not in interaction.user.roles:
+                    await interaction.user.add_roles(p_role)
+
             avatar_url = interaction.user.display_avatar.url if interaction.user else None
             embed = build_squid_enrollment_embed(result, avatar_url=avatar_url)
             await interaction.followup.send(embed=embed)
@@ -130,6 +171,9 @@ class SquidCog(commands.GroupCog, group_name="squid"):
                 reason=reason,
                 synthesize_audio=True
             )
+            if interaction.guild:
+                await self._swap_to_spectator(interaction.guild, str(member.id))
+
             avatar_url = member.display_avatar.url if member else None
             embed = build_squid_elimination_embed(result, avatar_url=avatar_url)
             if result.audio_bytes:
@@ -154,9 +198,12 @@ class SquidCog(commands.GroupCog, group_name="squid"):
         guild_id = str(interaction.guild_id)
         revived = await self.squid_service.revive_all_players(guild_id)
         await self.squid_service.reset_season(guild_id)
+        if interaction.guild:
+            await self._revive_roles(interaction.guild)
+
         embed = discord.Embed(
             title="○ △ □ ARENA RESET • NEW CYCLE INITIATED",
-            description=f"🔄 **All {revived} contestants have been revived.**\n💰 Piggy bank prize pool reset to `₩ 0`.",
+            description=f"🔄 **All {revived} contestants have been revived and granted Player status.**\n💰 Piggy bank prize pool reset to `₩ 0`.",
             color=discord.Color.from_rgb(255, 0, 144)
         )
         embed.set_footer(text="A fresh game can now be started with /squid redlight action:start")
@@ -309,6 +356,8 @@ class SquidCog(commands.GroupCog, group_name="squid"):
             # Timeout check for players who didn't cross 100m
             timeout_elims = await self.squid_service.timeout_slacking_players(guild_id)
             if timeout_elims:
+                for e in timeout_elims:
+                    await self._swap_to_spectator(channel.guild, e.user_id)
                 names = ", ".join(f"<@{e.user_id}>" for e in timeout_elims)
                 await channel.send(f"⏰ **TIME EXPIRED!** Eliminated for failing to reach 100m:\n{names}")
 
@@ -321,49 +370,6 @@ class SquidCog(commands.GroupCog, group_name="squid"):
         except Exception as e:
             logger.error("Error in automated red light session: %s", e, exc_info=True)
             self.squid_service.end_red_light_game(guild_id)
-
-class MoveCommandCog(commands.Cog):
-    """Top-level /move command for Red Light Green Light gameplay."""
-
-    def __init__(
-        self,
-        bot: commands.Bot,
-        squid_service: SquidService,
-        audio_deliverer: AudioDeliverer
-    ):
-        self.bot = bot
-        self.squid_service = squid_service
-        self.audio_deliverer = audio_deliverer
-
-    @app_commands.command(name="move", description="Take steps in Red Light Green Light (Safe only during Green Light!)")
-    @app_commands.checks.cooldown(1, 1.0, key=lambda i: (i.guild_id, i.user.id))
-    async def move(self, interaction: discord.Interaction):
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except discord.NotFound:
-            return
-
-        dto = RedLightMoveDTO(guild_id=str(interaction.guild_id), user_id=str(interaction.user.id))
-        try:
-            res = await self.squid_service.process_move(dto)
-            if not res.survived:
-                embed = discord.Embed(
-                    title="💀 SQUID GAME • ELIMINATION CONFIRMED",
-                    description=f"🚨 **`{res.player_number}` (<@{res.user_id}>) MOVED DURING RED LIGHT!**\nPlayer has been terminated.",
-                    color=discord.Color.from_rgb(255, 0, 144)
-                )
-                if interaction.user and interaction.user.display_avatar:
-                    embed.set_thumbnail(url=interaction.user.display_avatar.url)
-
-                if res.audio_bytes:
-                    await self.audio_deliverer.deliver(interaction, res.audio_bytes, "eliminated.wav", embed=embed)
-                else:
-                    await interaction.followup.send(embed=embed, ephemeral=True)
-            else:
-                badge = "🏁" if res.is_finished else "🏃"
-                await interaction.followup.send(f"{badge} **Player {res.player_number}**: {res.status_message}", ephemeral=True)
-        except AppError as e:
-            await interaction.followup.send(f"⚠️ {e.message}", ephemeral=True)
 
 async def setup(bot: commands.Bot):
     # Cogs mounted directly in bot.py

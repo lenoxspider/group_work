@@ -11,12 +11,13 @@ What it does NOT do:
 
 import logging
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional, Literal, Tuple
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from src.application.services.project_service import ProjectService
+from src.interface.channel_router import ChannelRouter
 from src.domain.errors import AppError
 from src.interface.discord_formatters import (
     COLOR_PRIMARY,
@@ -30,103 +31,186 @@ logger = logging.getLogger("interface.cogs.admin")
 class AdminCog(commands.Cog, name="Administration"):
     """Interface adapter for server setup, permission locking, and project lifecycle."""
 
-    def __init__(self, bot: commands.Bot, project_service: ProjectService):
+    CATEGORY_NAME = "TOVARISHCH"
+
+    def __init__(
+        self,
+        bot: commands.Bot,
+        project_service: ProjectService,
+        channel_router: ChannelRouter
+    ):
         self.bot = bot
         self.project_service = project_service
+        self.channel_router = channel_router
 
     project_group = app_commands.Group(name="project", description="Group project and sprint lifecycle commands")
 
-    async def _ensure_channels_and_roles(self, guild: discord.Guild) -> List[discord.TextChannel]:
-        """Creates or updates all project and Squid Game channels and roles with appropriate protections."""
+    async def _ensure_channels_and_roles(
+        self,
+        guild: discord.Guild,
+        repair: bool = False
+    ) -> Tuple[List[discord.TextChannel], Optional[str]]:
+        """Creates or repairs all project channels, TOVARISHCH category, and role permissions."""
+        hierarchy_warning = None
+
         # 1. Provision Player and Spectator roles
+        player_role = discord.utils.get(guild.roles, name="Player")
+        spectator_role = discord.utils.get(guild.roles, name="Spectator")
+
         if guild.me.guild_permissions.manage_roles:
-            if not discord.utils.get(guild.roles, name="Player"):
+            if not player_role:
                 try:
-                    await guild.create_role(
+                    player_role = await guild.create_role(
                         name="Player",
                         color=discord.Color.from_rgb(3, 122, 118),
                         mentionable=True,
-                        reason="Squid Game accountability role"
+                        reason="Squid Game accountability contestant role"
                     )
                 except Exception as e:
                     logger.warning("Could not auto-create Player role in guild %s: %s", guild.id, e)
 
-            if not discord.utils.get(guild.roles, name="Spectator"):
+            if not spectator_role:
                 try:
-                    await guild.create_role(
+                    spectator_role = await guild.create_role(
                         name="Spectator",
                         color=discord.Color.from_rgb(120, 120, 120),
                         mentionable=True,
-                        reason="Squid Game spectator role"
+                        reason="Squid Game observation role"
                     )
                 except Exception as e:
                     logger.warning("Could not auto-create Spectator role in guild %s: %s", guild.id, e)
 
-        # 2. Provision Channels
+        # Hierarchy check
+        if player_role and guild.me.top_role.position <= player_role.position:
+            hierarchy_warning = (
+                f"⚠️ **Role Hierarchy Warning**: Bot's top role (`{guild.me.top_role.name}`) is below "
+                f"or equal to the `Player` role! Please drag the bot's role higher in Server Settings → Roles."
+            )
+
+        # 2. Provision or resolve TOVARISHCH Category
+        category = discord.utils.get(guild.categories, name=self.CATEGORY_NAME)
+        if not category and guild.me.guild_permissions.manage_channels:
+            try:
+                category = await guild.create_category(name=self.CATEGORY_NAME)
+            except Exception as e:
+                logger.warning("Could not create %s category in guild %s: %s", self.CATEGORY_NAME, guild.id, e)
+
+        # 3. Channel configuration matrix
+        read_only_everyone = discord.PermissionOverwrite(
+            view_channel=True,
+            read_message_history=True,
+            send_messages=False,
+            send_messages_in_threads=False,
+            create_public_threads=False,
+            create_private_threads=False,
+            add_reactions=False,
+            manage_webhooks=False,
+            use_application_commands=False
+        )
+
+        bot_full = discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            manage_messages=True,
+            embed_links=True,
+            attach_files=True,
+            read_message_history=True,
+            manage_webhooks=True
+        )
+
         channel_configs = [
-            ("tasks", "📋 Group task ledger. Read-only display. Use /task to interact.", False),
-            ("deadlines", "🎯 Major project milestones and live countdowns. Read-only display. Use /deadline to interact.", False),
-            ("submissions", "📥 Verified deliverable submission vault. Read-only display. Use /submit to upload.", False),
-            ("wall-of-shame", "🚨 Public accountability ledger. Overdue tasks and broken streaks are recorded here.", False),
-            ("game-hub", "🎮 Squid Game Arena & Minigame Hub. Type /squid join to get your 3-digit player number.", True),
-            ("spectators", "💀 Observation deck for eliminated players.", False)
+            ("tasks", "📋 Group task ledger. Read-only display. Use /task to interact.", {
+                guild.default_role: read_only_everyone,
+                guild.me: bot_full
+            }),
+            ("deadlines", "🎯 Major project milestones and live countdowns. Read-only display.", {
+                guild.default_role: read_only_everyone,
+                guild.me: bot_full
+            }),
+            ("submissions", "📥 Verified deliverable submission vault. Read-only audit receipts.", {
+                guild.default_role: read_only_everyone,
+                guild.me: bot_full
+            }),
+            ("wall-of-shame", "🚨 Public accountability ledger. Overdue tasks recorded here.", {
+                guild.default_role: read_only_everyone,
+                guild.me: bot_full
+            }),
+            ("game-hub", "🎮 Squid Game Arena. Only active Players can execute commands.", {
+                guild.default_role: discord.PermissionOverwrite(
+                    view_channel=True, read_message_history=True, send_messages=False, use_application_commands=False
+                ),
+                guild.me: bot_full,
+                **(
+                    {player_role: discord.PermissionOverwrite(
+                        view_channel=True, read_message_history=True, send_messages=True, use_application_commands=True, add_reactions=True
+                    )} if player_role else {}
+                ),
+                **(
+                    {spectator_role: discord.PermissionOverwrite(
+                        view_channel=True, read_message_history=True, send_messages=False, use_application_commands=False
+                    )} if spectator_role else {}
+                )
+            }),
+            ("spectators", "💀 Observation deck for eliminated contestants.", {
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                guild.me: bot_full,
+                **(
+                    {spectator_role: discord.PermissionOverwrite(
+                        view_channel=True, read_message_history=True, send_messages=True
+                    )} if spectator_role else {}
+                )
+            }),
+            ("bot-log", "🛡️ Bot admin and security audit log. Private to staff and bot.", {
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                guild.me: bot_full
+            })
         ]
 
         created_or_found = []
-        for name, topic, allow_chat in channel_configs:
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(
-                    view_channel=True,
-                    read_message_history=True,
-                    send_messages=allow_chat,
-                    add_reactions=True
-                ),
-                guild.me: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    manage_messages=True,
-                    embed_links=True,
-                    attach_files=True,
-                    read_message_history=True
-                )
-            }
-
+        bindings = {}
+        for name, topic, overwrites in channel_configs:
             ch = discord.utils.get(guild.text_channels, name=name)
             is_new = False
             if not ch and guild.me.guild_permissions.manage_channels:
                 try:
-                    ch = await guild.create_text_channel(name=name, topic=topic, overwrites=overwrites)
+                    ch = await guild.create_text_channel(
+                        name=name,
+                        topic=topic,
+                        category=category,
+                        overwrites=overwrites
+                    )
                     is_new = True
                 except Exception as e:
                     logger.warning("Could not auto-create #%s in guild %s: %s", name, guild.name, e)
-            elif ch and guild.me.guild_permissions.manage_channels:
+            elif ch and repair and guild.me.guild_permissions.manage_channels:
                 try:
-                    await ch.edit(topic=topic, overwrites=overwrites)
+                    await ch.edit(topic=topic, category=category, overwrites=overwrites)
                 except Exception as e:
-                    logger.warning("Could not enforce permissions on #%s: %s", name, e)
+                    logger.warning("Could not repair overwrites on #%s: %s", name, e)
 
             if ch:
                 created_or_found.append(ch)
+                bindings[name] = str(ch.id)
                 if is_new and name == "game-hub":
                     welcome_embed = discord.Embed(
                         title="○ △ □ SQUID GAME ARENA • INITIALIZED",
                         description=(
                             "Welcome to the accountability arena.\n\n"
                             "**How to play:**\n"
-                            "• Type `/squid join` to enroll and receive your 3-digit tag (`001`–`456`).\n"
-                            "• Type `/squid status` to view the live piggy bank prize pool and survivor count.\n"
-                            "• Type `/move` to take steps during active Red Light Green Light rounds.\n"
-                            "• **Warning:** Missing your project deadlines will result in immediate termination."
+                            "• Type `/squid join` to claim your player tag (`001`–`456`) and gain arena access.\n"
+                            "• Eliminated players are moved to the private <#spectators> lounge.\n"
+                            "• Obey all directives from the Masked Guards."
                         ),
                         color=discord.Color.from_rgb(255, 0, 144)
                     )
-                    welcome_embed.set_footer(text="Obey all directives from the Masked Guards.")
                     try:
                         await ch.send(embed=welcome_embed)
                     except Exception:
                         pass
 
-        return created_or_found
+        # 4. Persist bindings in SQLite
+        await self.channel_router.bind_all(str(guild.id), bindings)
+        return created_or_found, hierarchy_warning
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):
@@ -136,46 +220,45 @@ class AdminCog(commands.Cog, name="Administration"):
 
     @app_commands.command(
         name="setup",
-        description="Provision all project channels, Squid Game arena, and roles at once"
+        description="Provision or repair all project channels, TOVARISHCH category, and role permissions"
     )
+    @app_commands.describe(action="setup (create missing) or repair (re-enforce all permission locks and bindings)")
     @app_commands.default_permissions(manage_channels=True)
-    async def setup_channels(self, interaction: discord.Interaction):
+    async def setup_channels(
+        self,
+        interaction: discord.Interaction,
+        action: Literal["setup", "repair"] = "setup"
+    ):
         try:
             await interaction.response.defer()
         except discord.NotFound:
-            logger.warning("Setup command interaction timed out before deferral.")
             return
         guild = interaction.guild
         if not guild:
             await interaction.followup.send("❌ Must be run in a server.", ephemeral=True)
             return
 
-        channels = await self._ensure_channels_and_roles(guild)
+        is_repair = (action == "repair")
+        channels, hierarchy_warning = await self._ensure_channels_and_roles(guild, repair=is_repair)
         ch_list = ", ".join(c.mention for c in channels) if channels else "None"
 
         embed = discord.Embed(
-            title="🛠️ Server Environment Fully Configured",
-            description=f"All channels and roles have been provisioned:\n\n{ch_list}",
+            title="🛠️ Server Environment Fully Configured" if not is_repair else "🔧 Server Permissions Repaired",
+            description=f"All channels under **TOVARISHCH** and roles are synchronized:\n\n{ch_list}",
             color=COLOR_SUCCESS
         )
+        if hierarchy_warning:
+            embed.add_field(name="⚠️ Attention Needed", value=hierarchy_warning, inline=False)
+
         embed.add_field(
-            name="🔒 Accountability Channels (Read-Only)",
-            value="• `#tasks` — Live task ledger\n• `#deadlines` — Pinned countdowns\n• `#submissions` — Verified file vault\n• `#wall-of-shame` — Overdue warnings",
+            name="🔒 Immutable Ledgers",
+            value="• `#tasks`\n• `#deadlines`\n• `#submissions`\n• `#wall-of-shame`",
             inline=True
         )
         embed.add_field(
-            name="🎮 Squid Game Arena (Interactive)",
-            value="• `#game-hub` — Lobby, announcements, minigames & elimination feed\n• `#spectators` — Fallen players observation deck",
+            name="🎮 Squid Game Arena",
+            value="• `#game-hub` (Player role only)\n• `#spectators` (Private eliminated deck)",
             inline=True
-        )
-        embed.add_field(
-            name="Quick Start Actions",
-            value=(
-                "1. Head over to <#game-hub> and type `/squid join` to claim your player number.\n"
-                "2. Assign group tasks with `/task add`.\n"
-                "3. View team rankings and on-time streaks with `/report`."
-            ),
-            inline=False
         )
         await interaction.followup.send(embed=embed)
 

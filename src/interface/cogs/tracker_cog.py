@@ -17,6 +17,7 @@ from discord.ext import commands
 
 from src.application.services.activity_service import ActivityService
 from src.application.services.vault_service import VaultService
+from src.interface.channel_router import ChannelRouter
 from src.domain.errors import AppError
 from src.interface.discord_formatters import build_vault_receipt_embed
 
@@ -31,11 +32,13 @@ class TrackerCog(commands.Cog, name="Activity Tracker"):
         self,
         bot: commands.Bot,
         activity_service: ActivityService,
-        vault_service: VaultService
+        vault_service: VaultService,
+        channel_router: Optional[ChannelRouter] = None
     ):
         self.bot = bot
         self.activity_service = activity_service
         self.vault_service = vault_service
+        self.channel_router = channel_router
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -91,18 +94,29 @@ class TrackerCog(commands.Cog, name="Activity Tracker"):
 
             receipt_embed = build_vault_receipt_embed(result, interaction.user.display_name)
 
-            # Locate #submissions channel to post public verification card
-            submissions_ch = discord.utils.get(guild.text_channels, name="submissions")
+            # Locate #submissions channel via ChannelRouter
+            submissions_ch = await self.channel_router.get(guild, "submissions") if self.channel_router else discord.utils.get(guild.text_channels, name="submissions")
+            jump_url_field = None
             if submissions_ch and submissions_ch.id != interaction.channel_id:
-                await submissions_ch.send(
+                posted_msg = await submissions_ch.send(
                     content=f"📥 **New Deliverable Submitted by {interaction.user.mention}:**",
                     embed=receipt_embed
                 )
+                jump_url_field = posted_msg.jump_url
+
+            if jump_url_field:
+                receipt_embed.add_field(name="🔗 Permanent Jump URL", value=f"[View Audit Receipt]({jump_url_field})", inline=False)
 
             await interaction.followup.send(
                 content=f"✅ **Deliverable submitted successfully!** Logged to #{submissions_ch.name if submissions_ch else 'current channel'}.",
                 embed=receipt_embed
             )
+        except discord.HTTPException as e:
+            if e.status == 413:
+                await interaction.followup.send("❌ **File Too Large**: Discord rejected the file upload (exceeds server limit). Please compress the deliverable.", ephemeral=True)
+                return
+            logger.error("HTTP error storing submission: %s", e)
+            await interaction.followup.send("❌ Network error while uploading deliverable.", ephemeral=True)
         except AppError as e:
             await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
         except Exception as e:

@@ -27,6 +27,8 @@ from src.application.services.preference_service import PreferenceService
 from src.application.services.voice_service import VoiceService
 from src.domain.errors import AppError
 from src.interface.cogs.task_buttons import TaskActionView
+from src.interface.channel_router import ChannelRouter
+from src.interface.cogs.task_buttons import TaskActionView
 from src.interface.cogs.extension_buttons import ExtensionVoteView
 from src.interface.discord_formatters import (
     build_task_embed,
@@ -48,12 +50,14 @@ class TasksCog(commands.Cog, name="Task Ledger"):
         bot: commands.Bot,
         task_service: TaskService,
         extension_service: ExtensionService,
+        channel_router: Optional[ChannelRouter] = None,
         preference_service: Optional[PreferenceService] = None,
         voice_service: Optional[VoiceService] = None
     ):
         self.bot = bot
         self.service = task_service
         self.extension_service = extension_service
+        self.channel_router = channel_router
         self.preference_service = preference_service
         self.voice_service = voice_service
         self.bot.add_view(TaskActionView(task_service))
@@ -110,8 +114,8 @@ class TasksCog(commands.Cog, name="Task Ledger"):
         guild = interaction.guild
         guild_id = str(guild.id) if guild else "0"
 
-        # Find #tasks channel if exists
-        tasks_ch = discord.utils.get(guild.text_channels, name="tasks") if guild else None
+        # Find #tasks channel via ChannelRouter
+        tasks_ch = await self.channel_router.get(guild, "tasks") if (guild and self.channel_router) else (discord.utils.get(guild.text_channels, name="tasks") if guild else None)
         channel_id = str(tasks_ch.id) if tasks_ch else None
 
         try:
@@ -238,7 +242,7 @@ class TasksCog(commands.Cog, name="Task Ledger"):
 
         guild = interaction.guild
         guild_id = str(guild.id) if guild else "0"
-        tasks_ch = discord.utils.get(guild.text_channels, name="tasks") if guild else None
+        tasks_ch = await self.channel_router.get(guild, "tasks") if (guild and self.channel_router) else None
 
         try:
             clean_id = task_id.strip().upper()
