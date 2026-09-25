@@ -35,6 +35,8 @@ class TaskResultDTO:
     created_at: datetime
     completed_at: Optional[datetime]
     is_completed: bool
+    is_in_progress: bool = False
+    is_on_time: Optional[bool] = None
 
 @dataclass(frozen=True)
 class TaskReminderActionDTO:
@@ -45,3 +47,13 @@ class TaskReminderActionDTO:
     description: str
     due_date: datetime
     reminder_tier: str  # '24h' or '1h'
+
+@dataclass(frozen=True)
+class OverdueShameActionDTO:
+    """Action payload for delinquent task to be posted to Wall of Shame."""
+    task_id: str
+    guild_id: str
+    user_id: str
+    description: str
+    due_date: datetime
+    hours_overdue: int

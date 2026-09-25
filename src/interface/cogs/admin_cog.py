@@ -37,11 +37,12 @@ class AdminCog(commands.Cog, name="Administration"):
     project_group = app_commands.Group(name="project", description="Group project and sprint lifecycle commands")
 
     async def _ensure_channels_with_protection(self, guild: discord.Guild) -> List[discord.TextChannel]:
-        """Creates or updates #tasks, #deadlines, and #submissions with read-only display protection."""
+        """Creates or updates #tasks, #deadlines, #submissions, and #wall-of-shame with read-only display protection."""
         channel_configs = [
             ("tasks", "📋 Group task ledger. Read-only display. Use /task to interact."),
             ("deadlines", "🎯 Major project milestones and live countdowns. Read-only display. Use /deadline to interact."),
-            ("submissions", "📥 Verified deliverable submission vault. Read-only display. Use /submit to upload.")
+            ("submissions", "📥 Verified deliverable submission vault. Read-only display. Use /submit to upload."),
+            ("wall-of-shame", "🚨 Public accountability ledger. Overdue tasks and broken streaks are recorded here.")
         ]
 
         overwrites = {
@@ -107,16 +108,16 @@ class AdminCog(commands.Cog, name="Administration"):
         )
         embed.add_field(
             name="🔒 Display Protection Active",
-            value="Members can view all cards and countdowns cleanly without chat clutter. Use slash commands to interact.",
+            value="Members can view tasks, countdowns, and shaming alerts cleanly without chat clutter. Use slash commands to interact.",
             inline=False
         )
         embed.add_field(
             name="Available Commands",
             value=(
-                "• `/task add` — Assign tasks with auto-reminders\n"
+                "• `/task add` — Assign tasks with auto-reminders and interactive buttons\n"
                 "• `/deadline add` — Live pinned countdowns\n"
                 "• `/submit` — Submit deliverable files with SHA-256 verification\n"
-                "• `/report` — Anti-free-riding contribution scoreboard\n"
+                "• `/report` — Anti-free-riding contribution scoreboard, ranks & streaks\n"
                 "• `/project status` — View overall project progress\n"
                 "• `/project finish` — Conclude project and archive channels"
             ),
@@ -153,7 +154,7 @@ class AdminCog(commands.Cog, name="Administration"):
 
             # Update channel topics to [ARCHIVED]
             date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            for name in ["tasks", "deadlines", "submissions"]:
+            for name in ["tasks", "deadlines", "submissions", "wall-of-shame"]:
                 ch = discord.utils.get(guild.text_channels, name=name)
                 if ch and guild.me.guild_permissions.manage_channels:
                     try:
@@ -183,16 +184,26 @@ class AdminCog(commands.Cog, name="Administration"):
             color=COLOR_PRIMARY
         )
         embed.add_field(
-            name="1. 📋 Task Ledger",
+            name="1. 📋 Task Ledger & Interactive Buttons",
             value=(
                 "`/task add <desc> <@member> <YYYY-MM-DD>` — Assign deliverable task\n"
                 "`/task complete <TASK-ID>` — Mark completed\n"
-                "`/task list` — View pending tasks"
+                "`/task list` — View pending tasks\n"
+                "• **Task Cards** include 🔔 **Nudge**, 🔄 **In Progress**, and ✅ **Complete** buttons!"
             ),
             inline=False
         )
         embed.add_field(
-            name="2. 🎯 Deadlines & Alerts",
+            name="2. 🚨 Wall of Shame & On-Time Streaks",
+            value=(
+                "• Missing deadlines automatically posts overdue alerts to `#wall-of-shame`.\n"
+                "• Overdue tasks break your consecutive on-time streak (`🔥 0`)!\n"
+                "• Complete on time to rank up: Comrade → Sergeant → Colonel → Marshal → General Secretary."
+            ),
+            inline=False
+        )
+        embed.add_field(
+            name="3. 🎯 Deadlines & Alerts",
             value=(
                 "`/deadline add <name> <YYYY-MM-DD HH:MM>` — Pin live countdown in `#deadlines`\n"
                 "`/deadline list` — View active milestones\n"
@@ -201,16 +212,16 @@ class AdminCog(commands.Cog, name="Administration"):
             inline=False
         )
         embed.add_field(
-            name="3. 📊 Anti-Free-Riding Reports & Submissions",
+            name="4. 📊 Anti-Free-Riding Reports & Submissions",
             value=(
                 "`/submit file:<attachment> [notes:<text>]` — Upload deliverable with hash verification\n"
-                "`/report` — View team contribution ranking\n"
-                "`/report <@member>` — View individual completion rate and message volume"
+                "`/report` — View team ranking with on-time streaks and military ranks\n"
+                "`/report <@member>` — View individual scorecard and deliverable history"
             ),
             inline=False
         )
         embed.add_field(
-            name="4. 🚀 Project Lifecycle",
+            name="5. 🚀 Project Lifecycle",
             value=(
                 "`/project status` — View overall project completion and upcoming milestones\n"
                 "`/project finish` — Archive project sprint and generate final retrospective report"

@@ -37,7 +37,9 @@ class DatabaseManager:
                     created_at TEXT NOT NULL,
                     completed_at TEXT NULL,
                     reminded_24h INTEGER DEFAULT 0,
-                    reminded_1h INTEGER DEFAULT 0
+                    reminded_1h INTEGER DEFAULT 0,
+                    is_in_progress INTEGER DEFAULT 0,
+                    shame_logged INTEGER DEFAULT 0
                 )
             """)
 
@@ -66,6 +68,9 @@ class DatabaseManager:
                     message_count INTEGER DEFAULT 0,
                     files_submitted INTEGER DEFAULT 0,
                     tasks_completed INTEGER DEFAULT 0,
+                    on_time_tasks INTEGER DEFAULT 0,
+                    current_streak INTEGER DEFAULT 0,
+                    best_streak INTEGER DEFAULT 0,
                     last_active TEXT NOT NULL,
                     PRIMARY KEY (guild_id, user_id)
                 )
@@ -94,6 +99,20 @@ class DatabaseManager:
                     archived_by TEXT
                 )
             """)
+
+            # Migrations for existing databases
+            migrations = [
+                ("tasks", "is_in_progress", "INTEGER DEFAULT 0"),
+                ("tasks", "shame_logged", "INTEGER DEFAULT 0"),
+                ("member_activity", "on_time_tasks", "INTEGER DEFAULT 0"),
+                ("member_activity", "current_streak", "INTEGER DEFAULT 0"),
+                ("member_activity", "best_streak", "INTEGER DEFAULT 0"),
+            ]
+            for table, col, col_type in migrations:
+                try:
+                    await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+                except Exception:
+                    pass
 
             await db.commit()
             logger.info("SQLite schema initialized successfully at %s", self.db_path)

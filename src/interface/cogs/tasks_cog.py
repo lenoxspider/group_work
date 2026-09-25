@@ -20,8 +20,10 @@ from discord.ext import commands, tasks
 from src.application.dtos.task_dtos import CreateTaskDTO
 from src.application.services.task_service import TaskService
 from src.domain.errors import AppError
+from src.interface.cogs.task_buttons import TaskActionView
 from src.interface.discord_formatters import (
     build_task_embed,
+    build_wall_of_shame_embed,
     format_discord_timestamps,
     COLOR_PRIMARY,
     COLOR_WARNING,
@@ -36,6 +38,7 @@ class TasksCog(commands.Cog, name="Task Ledger"):
     def __init__(self, bot: commands.Bot, task_service: TaskService):
         self.bot = bot
         self.service = task_service
+        self.bot.add_view(TaskActionView(task_service))
         self.reminder_loop.start()
 
     def cog_unload(self):
@@ -95,15 +98,21 @@ class TasksCog(commands.Cog, name="Task Ledger"):
             result = await self.service.create_task(dto)
 
             # Post embed to #tasks if channel exists
+            view = TaskActionView(self.service)
             if tasks_ch:
                 embed = build_task_embed(result)
-                post_msg = await tasks_ch.send(content=f"🔔 Task for {member.mention}:", embed=embed)
+                post_msg = await tasks_ch.send(
+                    content=f"🔔 Task for {member.mention}:",
+                    embed=embed,
+                    view=view
+                )
                 await self.service.update_task_message_id(result.task_id, str(post_msg.id))
 
             embed = build_task_embed(result)
             await interaction.followup.send(
                 content=f"✅ Task `{result.task_id}` created for {member.mention}!",
-                embed=embed
+                embed=embed,
+                view=view
             )
         except AppError as e:
             await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
@@ -114,20 +123,23 @@ class TasksCog(commands.Cog, name="Task Ledger"):
         await interaction.response.defer()
         try:
             result = await self.service.complete_task(task_id.strip().upper())
+            disabled_view = TaskActionView(self.service, is_completed=True)
             # Update ledger message if it exists
             if result.channel_id and result.message_id:
                 ch = self.bot.get_channel(int(result.channel_id))
                 if ch:
                     try:
                         msg = await ch.fetch_message(int(result.message_id))
-                        await msg.edit(embed=build_task_embed(result))
+                        await msg.edit(embed=build_task_embed(result), view=disabled_view)
                     except Exception:
                         pass
 
             embed = build_task_embed(result)
+            timing_str = " (on time ⚡)" if result.is_on_time else " (late ⚠️)"
             await interaction.followup.send(
-                content=f"🎉 Task `{result.task_id}` marked as completed!",
-                embed=embed
+                content=f"🎉 Task `{result.task_id}` marked as completed{timing_str}!",
+                embed=embed,
+                view=disabled_view
             )
         except AppError as e:
             await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
@@ -159,9 +171,28 @@ class TasksCog(commands.Cog, name="Task Ledger"):
             )
         await interaction.followup.send(embed=embed)
 
+    async def _dispatch_wall_of_shame(self, now: datetime):
+        """Finds overdue tasks and posts shaming notices to #wall-of-shame."""
+        try:
+            actions = await self.service.evaluate_overdue_tasks(now)
+            for act in actions:
+                guild = self.bot.get_guild(int(act.guild_id))
+                if not guild:
+                    continue
+                shame_ch = discord.utils.get(guild.text_channels, name="wall-of-shame")
+                if shame_ch:
+                    embed = build_wall_of_shame_embed(act)
+                    try:
+                        await shame_ch.send(content=f"🚨 **WALL OF SHAME ALERT:** <@{act.user_id}>", embed=embed)
+                    except Exception as e:
+                        logger.warning("Could not post to #wall-of-shame in guild %s: %s", guild.id, e)
+                await self.service.acknowledge_shame(act.task_id)
+        except Exception as e:
+            logger.error("Error in wall of shame dispatch: %s", e, exc_info=True)
+
     @tasks.loop(minutes=2)
     async def reminder_loop(self):
-        """Dispatches automated T-24h and T-1h reminders to assignees."""
+        """Dispatches automated reminders and posts overdue items to the Wall of Shame."""
         try:
             now = datetime.now(timezone.utc)
             actions = await self.service.evaluate_pending_reminders(now)
@@ -189,6 +220,9 @@ class TasksCog(commands.Cog, name="Task Ledger"):
                     await self.service.acknowledge_reminder(act.task_id, act.reminder_tier)
                 except Exception as e:
                     logger.warning("Could not DM reminder to user %s: %s", act.user_id, e)
+
+            # Check and post overdue tasks to the Wall of Shame
+            await self._dispatch_wall_of_shame(now)
         except Exception as e:
             logger.error("Error in task reminder loop: %s", e, exc_info=True)
 

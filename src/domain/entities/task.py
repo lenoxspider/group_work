@@ -30,6 +30,8 @@ class Task:
     completed_at: Optional[datetime] = None
     reminded_24h: bool = False
     reminded_1h: bool = False
+    is_in_progress: bool = False
+    shame_logged: bool = False
 
     def __post_init__(self):
         if not self.task_id.strip():
@@ -44,6 +46,27 @@ class Task:
         """Indicates whether the task has been marked complete."""
         return self.completed_at is not None
 
+    @property
+    def is_on_time(self) -> Optional[bool]:
+        """Returns True if completed on or before due date, False if late, None if open."""
+        if not self.is_completed or not self.completed_at:
+            return None
+        return self.completed_at <= self.due_date
+
+    def is_overdue(self, current_time: datetime) -> bool:
+        """Indicates if the open task is past its deadline."""
+        return not self.is_completed and current_time > self.due_date
+
+    def set_in_progress(self, in_progress: bool = True) -> None:
+        """Toggles the in-progress state of an open task."""
+        if self.is_completed:
+            raise TaskAlreadyCompletedError(f"Cannot change progress state on completed task {self.task_id}.")
+        self.is_in_progress = in_progress
+
+    def mark_shame_logged(self) -> None:
+        """Marks that this overdue task has been posted to Wall of Shame."""
+        self.shame_logged = True
+
     def mark_completed(self, completed_time: Optional[datetime] = None) -> None:
         """
         Transitions the task to completed state.
@@ -57,6 +80,7 @@ class Task:
         if self.is_completed:
             raise TaskAlreadyCompletedError(f"Task {self.task_id} is already completed.")
         self.completed_at = completed_time or datetime.now(timezone.utc)
+        self.is_in_progress = False
 
     def is_due_within(self, current_time: datetime, delta: timedelta) -> bool:
         """Checks if due date falls within the specified delta from current time."""

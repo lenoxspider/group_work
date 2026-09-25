@@ -8,6 +8,7 @@ What it does NOT do:
 - Does NOT implement SQL queries or database connections.
 """
 
+from datetime import datetime
 from typing import Protocol, Optional, List
 from src.domain.entities.task import Task
 
@@ -32,4 +33,16 @@ class TaskRepository(Protocol):
 
     async def update_reminder(self, task_id: str, reminder_tier: str) -> None:
         """Updates reminder flags ('24h' or '1h') for a task."""
+        ...
+
+    async def update_progress(self, task_id: str, in_progress: bool) -> None:
+        """Updates in-progress status flag for a task."""
+        ...
+
+    async def mark_shame_logged(self, task_id: str) -> None:
+        """Marks a task as posted to Wall of Shame."""
+        ...
+
+    async def get_overdue_unshamed(self, now: Optional[datetime] = None) -> List[Task]:
+        """Retrieves open overdue tasks that have not yet been shamed."""
         ...

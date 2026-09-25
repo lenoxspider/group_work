@@ -46,5 +46,34 @@ class TestSQLiteActivityRepository(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(standings[0].user_id, "user-1")
         self.assertEqual(standings[1].user_id, "user-2")
 
+    async def test_record_task_completed_streak_and_reset_streak(self):
+        # 1st on-time task: streak = 1
+        await self.repo.record_task_completed("guild-1", "user-3", is_on_time=True)
+        act1 = await self.repo.get_activity("guild-1", "user-3")
+        self.assertEqual(act1.current_streak, 1)
+        self.assertEqual(act1.best_streak, 1)
+        self.assertEqual(act1.on_time_tasks, 1)
+
+        # 2nd on-time task: streak = 2
+        await self.repo.record_task_completed("guild-1", "user-3", is_on_time=True)
+        act2 = await self.repo.get_activity("guild-1", "user-3")
+        self.assertEqual(act2.current_streak, 2)
+        self.assertEqual(act2.best_streak, 2)
+        self.assertEqual(act2.on_time_tasks, 2)
+
+        # Overdue item triggers reset_streak: current = 0, best preserved
+        await self.repo.reset_streak("guild-1", "user-3")
+        act3 = await self.repo.get_activity("guild-1", "user-3")
+        self.assertEqual(act3.current_streak, 0)
+        self.assertEqual(act3.best_streak, 2)
+
+        # 3rd task completed late: streak remains 0, tasks_completed increments
+        await self.repo.record_task_completed("guild-1", "user-3", is_on_time=False)
+        act4 = await self.repo.get_activity("guild-1", "user-3")
+        self.assertEqual(act4.current_streak, 0)
+        self.assertEqual(act4.best_streak, 2)
+        self.assertEqual(act4.tasks_completed, 3)
+        self.assertEqual(act4.on_time_tasks, 2)
+
 if __name__ == "__main__":
     unittest.main()

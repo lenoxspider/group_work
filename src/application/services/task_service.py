@@ -21,7 +21,8 @@ from src.domain.interfaces.activity_repository import ActivityRepository
 from src.application.dtos.task_dtos import (
     CreateTaskDTO,
     TaskResultDTO,
-    TaskReminderActionDTO
+    TaskReminderActionDTO,
+    OverdueShameActionDTO
 )
 
 class TaskService:
@@ -45,7 +46,9 @@ class TaskService:
             due_date=task.due_date,
             created_at=task.created_at,
             completed_at=task.completed_at,
-            is_completed=task.is_completed
+            is_completed=task.is_completed,
+            is_in_progress=task.is_in_progress,
+            is_on_time=task.is_on_time
         )
 
     async def create_task(self, dto: CreateTaskDTO) -> TaskResultDTO:
@@ -82,9 +85,43 @@ class TaskService:
             raise NotFoundError(f"Task with ID {task_id} not found.")
 
         task.mark_completed()
+        is_on_time = bool(task.is_on_time)
         await self._task_repo.save(task)
-        await self._activity_repo.record_task_completed(task.guild_id, task.assigned_to)
+        await self._activity_repo.record_task_completed(task.guild_id, task.assigned_to, is_on_time=is_on_time)
         return self._map_to_dto(task)
+
+    async def toggle_in_progress(self, task_id: str) -> TaskResultDTO:
+        """Toggles the in-progress status of an open task."""
+        task = await self._task_repo.get_by_id(task_id)
+        if not task:
+            raise NotFoundError(f"Task with ID {task_id} not found.")
+
+        task.set_in_progress(not task.is_in_progress)
+        await self._task_repo.update_progress(task_id, task.is_in_progress)
+        return self._map_to_dto(task)
+
+    async def evaluate_overdue_tasks(self, current_time: datetime) -> List[OverdueShameActionDTO]:
+        """Finds open tasks past due date and breaks user streaks."""
+        overdue_tasks = await self._task_repo.get_overdue_unshamed()
+        actions: List[OverdueShameActionDTO] = []
+
+        for task in overdue_tasks:
+            # Break on-time streak
+            await self._activity_repo.reset_streak(task.guild_id, task.assigned_to)
+            hours_diff = max(1, int((current_time - task.due_date).total_seconds() // 3600))
+            actions.append(OverdueShameActionDTO(
+                task_id=task.task_id,
+                guild_id=task.guild_id,
+                user_id=task.assigned_to,
+                description=task.description,
+                due_date=task.due_date,
+                hours_overdue=hours_diff
+            ))
+        return actions
+
+    async def acknowledge_shame(self, task_id: str) -> None:
+        """Marks task as logged to Wall of Shame."""
+        await self._task_repo.mark_shame_logged(task_id)
 
     async def get_pending_tasks(self, guild_id: str, member_id: Optional[str] = None) -> List[TaskResultDTO]:
         """Lists pending tasks for a guild, optionally filtered by member."""

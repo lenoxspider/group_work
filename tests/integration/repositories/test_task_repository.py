@@ -62,5 +62,45 @@ class TestSQLiteTaskRepository(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(updated.reminded_24h)
         self.assertFalse(updated.reminded_1h)
 
+    async def test_update_progress(self):
+        now = datetime.now(timezone.utc)
+        task = Task(
+            task_id="TASK-T03",
+            guild_id="guild-100",
+            channel_id=None,
+            message_id=None,
+            description="Progress test",
+            assigned_to="user-400",
+            due_date=now + timedelta(days=1),
+            created_at=now
+        )
+        await self.repo.save(task)
+        await self.repo.update_progress("TASK-T03", True)
+
+        updated = await self.repo.get_by_id("TASK-T03")
+        self.assertTrue(updated.is_in_progress)
+
+    async def test_get_overdue_unshamed_and_mark_shame_logged(self):
+        now = datetime.now(timezone.utc)
+        overdue_task = Task(
+            task_id="TASK-T04",
+            guild_id="guild-100",
+            channel_id=None,
+            message_id=None,
+            description="Overdue test",
+            assigned_to="user-400",
+            due_date=now - timedelta(hours=2),
+            created_at=now - timedelta(days=1)
+        )
+        await self.repo.save(overdue_task)
+
+        unshamed = await self.repo.get_overdue_unshamed(now)
+        self.assertEqual(len(unshamed), 1)
+        self.assertEqual(unshamed[0].task_id, "TASK-T04")
+
+        await self.repo.mark_shame_logged("TASK-T04")
+        unshamed_after = await self.repo.get_overdue_unshamed(now)
+        self.assertEqual(len(unshamed_after), 0)
+
 if __name__ == "__main__":
     unittest.main()

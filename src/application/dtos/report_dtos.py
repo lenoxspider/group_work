@@ -22,6 +22,10 @@ class MemberReportDTO:
     tasks_completed: int
     pending_tasks: int
     completion_rate: int
+    on_time_rate: int
+    current_streak: int
+    best_streak: int
+    rank_title: str
     contribution_score: float
     last_active: Optional[datetime]
 
@@ -32,6 +36,9 @@ class GuildStandingItemDTO:
     message_count: int
     files_submitted: int
     tasks_completed: int
+    on_time_rate: int
+    current_streak: int
+    rank_title: str
     contribution_score: float
 
 @dataclass(frozen=True)

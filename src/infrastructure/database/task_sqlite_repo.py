@@ -35,7 +35,9 @@ class SQLiteTaskRepository(TaskRepository):
             created_at=datetime.fromisoformat(row["created_at"]),
             completed_at=completed,
             reminded_24h=bool(row["reminded_24h"]),
-            reminded_1h=bool(row["reminded_1h"])
+            reminded_1h=bool(row["reminded_1h"]),
+            is_in_progress=bool(row.get("is_in_progress", 0)),
+            shame_logged=bool(row.get("shame_logged", 0))
         )
 
     async def save(self, task: Task) -> None:
@@ -45,8 +47,8 @@ class SQLiteTaskRepository(TaskRepository):
                 INSERT INTO tasks (
                     task_id, guild_id, channel_id, message_id, description,
                     assigned_to, due_date, created_at, completed_at,
-                    reminded_24h, reminded_1h
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    reminded_24h, reminded_1h, is_in_progress, shame_logged
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(task_id) DO UPDATE SET
                     channel_id = excluded.channel_id,
                     message_id = excluded.message_id,
@@ -55,12 +57,15 @@ class SQLiteTaskRepository(TaskRepository):
                     due_date = excluded.due_date,
                     completed_at = excluded.completed_at,
                     reminded_24h = excluded.reminded_24h,
-                    reminded_1h = excluded.reminded_1h
+                    reminded_1h = excluded.reminded_1h,
+                    is_in_progress = excluded.is_in_progress,
+                    shame_logged = excluded.shame_logged
             """, (
                 task.task_id, task.guild_id, task.channel_id, task.message_id,
                 task.description, task.assigned_to, task.due_date.isoformat(),
                 task.created_at.isoformat(), completed_str,
-                1 if task.reminded_24h else 0, 1 if task.reminded_1h else 0
+                1 if task.reminded_24h else 0, 1 if task.reminded_1h else 0,
+                1 if task.is_in_progress else 0, 1 if task.shame_logged else 0
             ))
             await db.commit()
 
@@ -95,3 +100,25 @@ class SQLiteTaskRepository(TaskRepository):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(f"UPDATE tasks SET {col} = 1 WHERE task_id = ?", (task_id,))
             await db.commit()
+
+    async def update_progress(self, task_id: str, in_progress: bool) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("UPDATE tasks SET is_in_progress = ? WHERE task_id = ?", (1 if in_progress else 0, task_id))
+            await db.commit()
+
+    async def mark_shame_logged(self, task_id: str) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("UPDATE tasks SET shame_logged = 1 WHERE task_id = ?", (task_id,))
+            await db.commit()
+
+    async def get_overdue_unshamed(self, now: Optional[datetime] = None) -> List[Task]:
+        now_dt = now or datetime.now(timezone.utc)
+        now_str = now_dt.isoformat()
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM tasks WHERE completed_at IS NULL AND shame_logged = 0 AND due_date < ?",
+                (now_str,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [self._row_to_entity(dict(r)) for r in rows]

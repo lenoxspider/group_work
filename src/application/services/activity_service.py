@@ -45,6 +45,11 @@ class ActivityService:
         total_tasks = tasks_done + user_pending_count
         completion_rate = int((tasks_done / total_tasks) * 100) if total_tasks > 0 else 0
 
+        on_time_rate = activity.on_time_rate if activity else 100
+        current_streak = activity.current_streak if activity else 0
+        best_streak = activity.best_streak if activity else 0
+        rank_title = activity.rank_title if activity else "Comrade 🎖️"
+
         return MemberReportDTO(
             guild_id=guild_id,
             user_id=user_id,
@@ -53,6 +58,10 @@ class ActivityService:
             tasks_completed=tasks_done,
             pending_tasks=user_pending_count,
             completion_rate=completion_rate,
+            on_time_rate=on_time_rate,
+            current_streak=current_streak,
+            best_streak=best_streak,
+            rank_title=rank_title,
             contribution_score=score,
             last_active=last_active
         )
@@ -66,6 +75,9 @@ class ActivityService:
                 message_count=s.message_count,
                 files_submitted=s.files_submitted,
                 tasks_completed=s.tasks_completed,
+                on_time_rate=s.on_time_rate,
+                current_streak=s.current_streak,
+                rank_title=s.rank_title,
                 contribution_score=s.contribution_score
             )
             for s in standings

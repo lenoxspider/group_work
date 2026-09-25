@@ -16,7 +16,8 @@ def make_task(
     assigned_to: str = "user-456",
     description: str = "Sample deliverable",
     hours_from_now: int = 48,
-    is_completed: bool = False
+    is_completed: bool = False,
+    is_in_progress: bool = False
 ) -> Task:
     now = datetime.now(timezone.utc)
     completed_at = now if is_completed else None
@@ -29,7 +30,8 @@ def make_task(
         assigned_to=assigned_to,
         due_date=now + timedelta(hours=hours_from_now),
         created_at=now,
-        completed_at=completed_at
+        completed_at=completed_at,
+        is_in_progress=is_in_progress
     )
 
 def make_deadline(
@@ -56,7 +58,10 @@ def make_activity(
     user_id: str = "user-456",
     messages: int = 10,
     files: int = 2,
-    tasks_done: int = 3
+    tasks_done: int = 3,
+    on_time_tasks: int = 3,
+    current_streak: int = 3,
+    best_streak: int = 5
 ) -> MemberActivity:
     return MemberActivity(
         guild_id=guild_id,
@@ -64,5 +69,8 @@ def make_activity(
         message_count=messages,
         files_submitted=files,
         tasks_completed=tasks_done,
+        on_time_tasks=on_time_tasks,
+        current_streak=current_streak,
+        best_streak=best_streak,
         last_active=datetime.now(timezone.utc)
     )

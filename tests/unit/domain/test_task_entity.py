@@ -45,5 +45,28 @@ class TestTaskEntity(unittest.TestCase):
         task.due_date = now + timedelta(minutes=30)
         self.assertTrue(task.needs_1h_reminder(now))
 
+    def test_set_in_progress(self):
+        task = make_task()
+        self.assertFalse(task.is_in_progress)
+        task.set_in_progress(True)
+        self.assertTrue(task.is_in_progress)
+
+    def test_is_overdue(self):
+        now = datetime.now(timezone.utc)
+        task_future = make_task(hours_from_now=5)
+        self.assertFalse(task_future.is_overdue(now))
+
+        task_past = make_task(hours_from_now=-2)
+        self.assertTrue(task_past.is_overdue(now))
+
+        task_completed = make_task(hours_from_now=-2, is_completed=True)
+        self.assertFalse(task_completed.is_overdue(now))
+
+    def test_mark_shame_logged(self):
+        task = make_task()
+        self.assertFalse(task.shame_logged)
+        task.mark_shame_logged()
+        self.assertTrue(task.shame_logged)
+
 if __name__ == "__main__":
     unittest.main()

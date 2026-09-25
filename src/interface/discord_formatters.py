@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Tuple, Optional
 import discord
 
-from src.application.dtos.task_dtos import TaskResultDTO
+from src.application.dtos.task_dtos import TaskResultDTO, OverdueShameActionDTO
 from src.application.dtos.deadline_dtos import DeadlineResultDTO
 from src.application.dtos.report_dtos import MemberReportDTO, GuildReportDTO
 from src.application.dtos.project_dtos import ProjectStatusDTO, ProjectArchiveSummaryDTO
@@ -34,8 +34,19 @@ def format_discord_timestamps(dt: datetime) -> Tuple[str, str]:
 def build_task_embed(dto: TaskResultDTO) -> discord.Embed:
     """Builds a formatted task ledger embed card."""
     abs_ts, rel_ts = format_discord_timestamps(dto.due_date)
-    color = COLOR_SUCCESS if dto.is_completed else COLOR_PRIMARY
-    title = f"{'✅' if dto.is_completed else '📋'} Task: {dto.task_id}"
+    if dto.is_completed:
+        color = COLOR_SUCCESS
+        title = f"✅ Task: {dto.task_id}"
+        timing_badge = " (On-Time ⚡)" if dto.is_on_time else " (Late ⚠️)"
+        status_text = f"Completed at {dto.completed_at}{timing_badge}"
+    elif dto.is_in_progress:
+        color = COLOR_WARNING
+        title = f"🔄 Task: {dto.task_id}"
+        status_text = "In Progress ⚙️"
+    else:
+        color = COLOR_PRIMARY
+        title = f"📋 Task: {dto.task_id}"
+        status_text = "Pending ⏳"
 
     embed = discord.Embed(
         title=title,
@@ -44,10 +55,9 @@ def build_task_embed(dto: TaskResultDTO) -> discord.Embed:
         timestamp=datetime.now(timezone.utc)
     )
     embed.add_field(name="👤 Assignee", value=f"<@{dto.assigned_to}>", inline=True)
-    status_text = f"Completed at {dto.completed_at}" if dto.is_completed else "In Progress"
     embed.add_field(name="📌 Status", value=f"`{status_text}`", inline=True)
     embed.add_field(name="⏰ Due Date", value=f"{abs_ts} ({rel_ts})", inline=False)
-    footer = "Task completed" if dto.is_completed else f"Mark complete with: /task complete {dto.task_id}"
+    footer = "Task completed" if dto.is_completed else f"Task ID: {dto.task_id} • Use buttons below or /task complete"
     embed.set_footer(text=footer)
     return embed
 
@@ -69,10 +79,10 @@ def build_deadline_embed(dto: DeadlineResultDTO) -> discord.Embed:
     return embed
 
 def build_member_report_embed(dto: MemberReportDTO, member: discord.Member) -> discord.Embed:
-    """Builds an individual student contribution scorecard embed."""
+    """Builds an individual student contribution scorecard embed with rank and streaks."""
     embed = discord.Embed(
         title=f"📊 Contribution Scorecard: {member.display_name}",
-        description="Anti-free-riding metrics and deliverables breakdown.",
+        description=f"Anti-free-riding metrics • Military Rank: 🎖️ **{dto.rank_title}**",
         color=COLOR_PRIMARY,
         timestamp=datetime.now(timezone.utc)
     )
@@ -83,31 +93,41 @@ def build_member_report_embed(dto: MemberReportDTO, member: discord.Member) -> d
     bar_str = "🟩" * bar_filled + "⬜" * (10 - bar_filled)
 
     embed.add_field(
-        name="✅ Tasks Completed",
+        name="✅ Tasks Delivered",
         value=f"**{dto.tasks_completed}** (Pending: {dto.pending_tasks})",
         inline=True
     )
-    embed.add_field(name="💬 Messages Sent", value=f"**{dto.message_count}**", inline=True)
-    embed.add_field(name="📁 Files Submitted", value=f"**{dto.files_submitted}**", inline=True)
+    embed.add_field(
+        name="🔥 On-Time Streak",
+        value=f"**{dto.current_streak}** (Best: {dto.best_streak})",
+        inline=True
+    )
+    embed.add_field(
+        name="⏱️ On-Time Rate",
+        value=f"**{dto.on_time_rate}%** ({dto.on_time_tasks}/{dto.tasks_completed})",
+        inline=True
+    )
+    embed.add_field(name="💬 Messages", value=f"**{dto.message_count}**", inline=True)
+    embed.add_field(name="📁 Vault Deliverables", value=f"**{dto.files_submitted}**", inline=True)
+    embed.add_field(
+        name="🏆 Contribution Score",
+        value=f"**{dto.contribution_score:.1f}** pts",
+        inline=True
+    )
     embed.add_field(
         name="📈 Task Completion Rate",
         value=f"{bar_str} **{dto.completion_rate}%**",
         inline=False
     )
-    embed.add_field(
-        name="🏆 Contribution Score",
-        value=f"**{dto.contribution_score:.1f}** points",
-        inline=True
-    )
     last_act = dto.last_active.strftime('%Y-%m-%d %H:%M') if dto.last_active else "No activity"
-    embed.set_footer(text=f"Last active: {last_act}")
+    embed.set_footer(text=f"Rank: {dto.rank_title} • Last active: {last_act}")
     return embed
 
 def build_guild_report_embed(dto: GuildReportDTO, guild: discord.Guild) -> discord.Embed:
-    """Builds the team contribution leaderboard embed."""
+    """Builds the team contribution leaderboard embed with ranks and streaks."""
     embed = discord.Embed(
         title=f"🏆 Team Contribution Standings: {guild.name}",
-        description="Ranking group participation, deliverables, and completed tasks.",
+        description="Ranking group participation, deliverables, on-time streaks, and military ranks.",
         color=COLOR_PRIMARY,
         timestamp=datetime.now(timezone.utc)
     )
@@ -119,12 +139,29 @@ def build_guild_report_embed(dto: GuildReportDTO, guild: discord.Guild) -> disco
     for idx, item in enumerate(dto.standings[:10], start=1):
         member = guild.get_member(int(item.user_id))
         name = member.display_name if member else f"User {item.user_id}"
+        streak_str = f"🔥 `{item.current_streak}`" if item.current_streak > 0 else "❄️ `0`"
         lines.append(
-            f"**{idx}. {name}** — Score: `{item.contribution_score:.1f}` | "
-            f"✅ `{item.tasks_completed}` | 📁 `{item.files_submitted}` | 💬 `{item.message_count}`"
+            f"**{idx}. {name}** [🎖️ {item.rank_title}] — Score: `{item.contribution_score:.1f}` | "
+            f"Streak: {streak_str} | ✅ `{item.tasks_completed}` | 📁 `{item.files_submitted}`"
         )
     embed.add_field(name="Leaderboard", value="\n".join(lines), inline=False)
-    embed.set_footer(text="Keep delivering to maintain team momentum!")
+    embed.set_footer(text="Complete deliverables on time to rank up and maintain your streak!")
+    return embed
+
+def build_wall_of_shame_embed(dto: OverdueShameActionDTO) -> discord.Embed:
+    """Builds a public shaming embed for an overdue deliverable."""
+    abs_ts, rel_ts = format_discord_timestamps(dto.due_date)
+    embed = discord.Embed(
+        title="🚨 WALL OF SHAME: Overdue Task Alert!",
+        description=f"Attention team: <@{dto.user_id}> has failed to deliver their committed task on time.",
+        color=COLOR_DANGER,
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.add_field(name="📋 Delinquent Task", value=f"**{dto.description}** (`{dto.task_id}`)", inline=False)
+    embed.add_field(name="⏰ Deadline Was", value=f"{abs_ts} ({rel_ts})", inline=True)
+    embed.add_field(name="⚠️ Overdue By", value=f"**{dto.hours_overdue} hour(s)**", inline=True)
+    embed.add_field(name="💔 Penalty Applied", value="Consecutive on-time streak reset to **0**! 🔥 0", inline=False)
+    embed.set_footer(text="Deliver your commitments promptly to maintain team accountability.")
     return embed
 
 def build_vault_receipt_embed(dto: VaultSubmissionResultDTO, user_name: str) -> discord.Embed:

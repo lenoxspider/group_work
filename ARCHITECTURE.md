@@ -85,9 +85,10 @@ discord_group_work/
 │       ├── discord_formatters.py    # Discord Embed card formatters and relative timestamps
 │       └── cogs/
 │           ├── __init__.py
-│           ├── tasks_cog.py         # /task add, /task complete, /task list & 2m reminder loop
+│           ├── task_buttons.py      # Persistent TaskActionView (Nudge, In-Progress, Complete buttons)
+│           ├── tasks_cog.py         # /task commands, Wall of Shame dispatcher & reminder loop
 │           ├── deadlines_cog.py     # /deadline add, /deadline list & 15m countdown update loop
-│           ├── reports_cog.py       # /report (team leaderboard and individual scorecard)
+│           ├── reports_cog.py       # /report (team leaderboard, military ranks & on-time streaks)
 │           ├── tracker_cog.py       # on_message counting & in-server /submit deliverable receiver
 │           └── admin_cog.py         # /setup, /guide, read-only protection, and /project commands
 │

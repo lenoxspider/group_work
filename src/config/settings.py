@@ -28,6 +28,7 @@ class Settings:
     tasks_channel: str
     deadlines_channel: str
     submissions_channel: str
+    wall_of_shame_channel: str
     database_path: str
     uploads_dir: str
     default_timezone: str
@@ -58,6 +59,7 @@ class Settings:
             tasks_channel=os.getenv("TASKS_CHANNEL_NAME", "tasks").lower().strip(),
             deadlines_channel=os.getenv("DEADLINES_CHANNEL_NAME", "deadlines").lower().strip(),
             submissions_channel=os.getenv("SUBMISSIONS_CHANNEL_NAME", "submissions").lower().strip(),
+            wall_of_shame_channel=os.getenv("WALL_OF_SHAME_CHANNEL_NAME", "wall-of-shame").lower().strip(),
             database_path=db_path,
             uploads_dir=uploads_dir,
             default_timezone=os.getenv("DEFAULT_TIMEZONE", "UTC").strip()

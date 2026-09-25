@@ -26,8 +26,12 @@ class ActivityRepository(Protocol):
         """Atomically increments file submission count for member."""
         ...
 
-    async def record_task_completed(self, guild_id: str, user_id: str) -> None:
-        """Atomically increments completed tasks count for member."""
+    async def record_task_completed(self, guild_id: str, user_id: str, is_on_time: bool = True) -> None:
+        """Atomically increments completed tasks count, tracking streaks and on-time rates."""
+        ...
+
+    async def reset_streak(self, guild_id: str, user_id: str) -> None:
+        """Resets member's current on-time streak to 0 upon overdue item."""
         ...
 
     async def get_guild_standings(self, guild_id: str) -> List[MemberActivity]:
