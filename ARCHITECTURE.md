@@ -40,12 +40,14 @@ discord_group_work/
 │   │   │   ├── __init__.py
 │   │   │   ├── task.py              # Task aggregate: status transitions, reminder thresholds
 │   │   │   ├── deadline.py          # Milestone aggregate: alert thresholds, countdown status
-│   │   │   └── member_activity.py   # Member metrics aggregate: activity score calculation
+│   │   │   ├── member_activity.py   # Member metrics aggregate: activity score calculation
+│   │   │   └── project_state.py     # Project aggregate: sprint lifecycle (ACTIVE, ARCHIVED)
 │   │   └── interfaces/
 │   │       ├── __init__.py
 │   │       ├── task_repository.py   # TaskRepository abstract protocol/interface
 │   │       ├── deadline_repository.py# DeadlineRepository abstract protocol/interface
 │   │       ├── activity_repository.py# ActivityRepository abstract protocol/interface
+│   │       ├── project_repository.py # ProjectRepository abstract protocol/interface
 │   │       └── vault_storage.py     # VaultStorage abstract protocol/interface
 │   │
 │   ├── application/                 # USE CASES: Orchestration, DTOs
@@ -54,13 +56,15 @@ discord_group_work/
 │   │   │   ├── __init__.py
 │   │   │   ├── task_dtos.py         # CreateTaskDTO, TaskResultDTO, ReminderEvaluationDTO
 │   │   │   ├── deadline_dtos.py     # CreateDeadlineDTO, DeadlineResultDTO, AlertEvaluationDTO
-│   │   │   └── report_dtos.py       # MemberReportDTO, GuildReportDTO
+│   │   │   ├── report_dtos.py       # MemberReportDTO, GuildReportDTO
+│   │   │   └── project_dtos.py      # ProjectStatusDTO, ProjectArchiveSummaryDTO
 │   │   └── services/
 │   │       ├── __init__.py
 │   │       ├── task_service.py      # Task use cases (assign, complete, list, process reminders)
 │   │       ├── deadline_service.py  # Milestone use cases (schedule, evaluate alerts, complete)
 │   │       ├── activity_service.py  # Metrics use cases (record message, generate reports)
-│   │       └── vault_service.py     # Vault use cases (verify SHA-256, store, record submission)
+│   │       ├── vault_service.py     # Vault use cases (verify SHA-256, store, record submission)
+│   │       └── project_service.py   # Lifecycle use cases (status dashboard, finish/archive)
 │   │
 │   ├── infrastructure/              # ADAPTERS: SQLite DB, File Vault
 │   │   ├── __init__.py
@@ -69,7 +73,8 @@ discord_group_work/
 │   │   │   ├── connection.py        # aiosqlite connection management & schema migrations
 │   │   │   ├── task_sqlite_repo.py  # SQLite implementation of TaskRepository
 │   │   │   ├── deadline_sqlite_repo.py# SQLite implementation of DeadlineRepository
-│   │   │   └── activity_sqlite_repo.py# SQLite implementation of ActivityRepository
+│   │   │   ├── activity_sqlite_repo.py# SQLite implementation of ActivityRepository
+│   │   │   └── project_sqlite_repo.py # SQLite implementation of ProjectRepository
 │   │   └── storage/
 │   │       ├── __init__.py
 │   │       └── local_file_vault.py  # Local filesystem implementation of VaultStorage
@@ -83,8 +88,8 @@ discord_group_work/
 │           ├── tasks_cog.py         # /task add, /task complete, /task list & 2m reminder loop
 │           ├── deadlines_cog.py     # /deadline add, /deadline list & 15m countdown update loop
 │           ├── reports_cog.py       # /report (team leaderboard and individual scorecard)
-│           ├── tracker_cog.py       # on_message counting & DM deliverable vault receiver
-│           └── admin_cog.py         # /setup, /guide, and auto-channel setup on guild join
+│           ├── tracker_cog.py       # on_message counting & in-server /submit deliverable receiver
+│           └── admin_cog.py         # /setup, /guide, read-only protection, and /project commands
 │
 ├── tests/
 │   ├── __init__.py

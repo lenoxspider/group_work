@@ -46,10 +46,14 @@ This project strictly adheres to Domain-Driven Design (DDD) and Clean Architectu
 - The bot computes a SHA-256 cryptographic hash, renames the file (`draft_v1_YYYYMMDD_<hash[:8]>.ext`), archives it safely into `./uploads/`, and posts an embed card into `#submissions` with the verification details and submitter information.
 - Transparent for the whole team and increments the student's `files_submitted` counter in the `/report` anti-free-riding metrics.
 
-### 5. 🛠️ Server Setup & Auto-Provisioning
-- Automatically provisions `#tasks`, `#deadlines`, and `#submissions` when joining a server.
-- Administrators can manually verify or re-create channels anytime with `/setup`.
-- Full command cheat sheet available via `/guide`.
+### 5. 🔒 Read-Only Display Protection & Auto-Setup
+- **Display Protection**: `#tasks`, `#deadlines`, and `#submissions` are automatically configured as **Read-Only** for members (`@everyone`).
+- Eliminates chat clutter: members view cards and countdowns cleanly without distracting chatter, while interacting through slash commands.
+- Run `/setup` anytime to verify or enforce channel display protection.
+
+### 6. 🚀 Project / Sprint Lifecycle (`/project`)
+- **`/project status`**: Displays an active project health dashboard showing completion rates, open tasks, files submitted, and the next upcoming milestone.
+- **`/project finish`**: Concludes the project sprint, updates channel topics to `[ARCHIVED]`, preserves channels in read-only mode, and posts a comprehensive **Final Project Retrospective & Contribution Report** to `#submissions`.
 
 ---
 

@@ -17,6 +17,7 @@ import discord
 from src.application.dtos.task_dtos import TaskResultDTO
 from src.application.dtos.deadline_dtos import DeadlineResultDTO
 from src.application.dtos.report_dtos import MemberReportDTO, GuildReportDTO
+from src.application.dtos.project_dtos import ProjectStatusDTO, ProjectArchiveSummaryDTO
 from src.application.services.vault_service import VaultSubmissionResultDTO
 
 COLOR_PRIMARY = discord.Color.from_rgb(88, 101, 242)
@@ -143,4 +144,63 @@ def build_vault_receipt_embed(dto: VaultSubmissionResultDTO, user_name: str) -> 
         embed.add_field(name="📝 Notes", value=dto.notes, inline=False)
     embed.add_field(name="🔐 SHA-256 Hash", value=f"```{dto.file_hash}```", inline=False)
     embed.set_footer(text="Submission verified • Contribution score updated")
+    return embed
+
+def build_project_status_embed(dto: ProjectStatusDTO, guild_name: str) -> discord.Embed:
+    """Builds a real-time project progress dashboard embed."""
+    embed = discord.Embed(
+        title=f"📊 Project Health Dashboard: {guild_name}",
+        description=f"Current Status: **`{dto.status}`**",
+        color=COLOR_PRIMARY,
+        timestamp=datetime.now(timezone.utc)
+    )
+    completion_rate = int((dto.completed_tasks / dto.total_tasks * 100)) if dto.total_tasks > 0 else 0
+    bar_filled = min(10, max(0, completion_rate // 10))
+    bar_str = "🟩" * bar_filled + "⬜" * (10 - bar_filled)
+
+    embed.add_field(
+        name="📋 Deliverable Tasks",
+        value=f"**{dto.completed_tasks}** completed / **{dto.total_tasks}** total\n{bar_str} **{completion_rate}%**",
+        inline=False
+    )
+
+    if dto.nearest_deadline_name and dto.nearest_deadline_due:
+        abs_ts, rel_ts = format_discord_timestamps(dto.nearest_deadline_due)
+        embed.add_field(
+            name="🎯 Next Upcoming Milestone",
+            value=f"**{dto.nearest_deadline_name}**\nDue: {abs_ts} ({rel_ts})",
+            inline=False
+        )
+    else:
+        embed.add_field(name="🎯 Next Upcoming Milestone", value="No active deadlines scheduled.", inline=False)
+
+    embed.add_field(name="📁 Vault Deliverables", value=f"**{dto.total_files_submitted}** files verified", inline=True)
+    embed.add_field(name="⏳ Open Tasks", value=f"**{dto.pending_tasks}** remaining", inline=True)
+    embed.set_footer(text="Keep updating tasks to keep your accountability score high!")
+    return embed
+
+def build_project_archive_embed(dto: ProjectArchiveSummaryDTO, guild_name: str) -> discord.Embed:
+    """Builds the final retrospective summary embed upon project completion."""
+    embed = discord.Embed(
+        title=f"🎓 Project Sprint Completed & Archived: {guild_name}",
+        description=(
+            f"This project has been officially concluded and archived by **{dto.archived_by}**.\n"
+            f"All display channels (`#tasks`, `#deadlines`, `#submissions`) are preserved in read-only mode."
+        ),
+        color=COLOR_SUCCESS,
+        timestamp=dto.archived_at
+    )
+    embed.add_field(name="✅ Total Tasks Completed", value=f"**{dto.total_tasks_completed}** tasks", inline=True)
+    embed.add_field(name="📁 Verified Files Archived", value=f"**{dto.total_files_submitted}** deliverables", inline=True)
+
+    if dto.standings:
+        lines = []
+        for idx, item in enumerate(dto.standings[:10], start=1):
+            lines.append(
+                f"**{idx}. <@{item.user_id}>** — Score: `{item.contribution_score:.1f}` pts | "
+                f"✅ `{item.tasks_completed}` tasks | 📁 `{item.files_submitted}` files"
+            )
+        embed.add_field(name="🏆 Final Member Standings", value="\n".join(lines), inline=False)
+
+    embed.set_footer(text="Project archived • Great work everyone!")
     return embed

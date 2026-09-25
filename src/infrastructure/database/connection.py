@@ -85,5 +85,15 @@ class DatabaseManager:
                 )
             """)
 
+            # 5. Project state table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS project_state (
+                    guild_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    archived_at TEXT,
+                    archived_by TEXT
+                )
+            """)
+
             await db.commit()
             logger.info("SQLite schema initialized successfully at %s", self.db_path)

@@ -18,12 +18,14 @@ from src.infrastructure.database.connection import DatabaseManager
 from src.infrastructure.database.task_sqlite_repo import SQLiteTaskRepository
 from src.infrastructure.database.deadline_sqlite_repo import SQLiteDeadlineRepository
 from src.infrastructure.database.activity_sqlite_repo import SQLiteActivityRepository
+from src.infrastructure.database.project_sqlite_repo import SQLiteProjectRepository
 from src.infrastructure.storage.local_file_vault import LocalFileVault
 
 from src.application.services.task_service import TaskService
 from src.application.services.deadline_service import DeadlineService
 from src.application.services.activity_service import ActivityService
 from src.application.services.vault_service import VaultService
+from src.application.services.project_service import ProjectService
 
 from src.interface.cogs.tasks_cog import TasksCog
 from src.interface.cogs.deadlines_cog import DeadlinesCog
@@ -55,6 +57,7 @@ class GroupAccountabilityBot(commands.Bot):
         self.task_repo = SQLiteTaskRepository(settings.database_path)
         self.deadline_repo = SQLiteDeadlineRepository(settings.database_path)
         self.activity_repo = SQLiteActivityRepository(settings.database_path)
+        self.project_repo = SQLiteProjectRepository(settings.database_path)
         self.file_vault = LocalFileVault(settings.uploads_dir)
 
         # Application Services
@@ -62,6 +65,12 @@ class GroupAccountabilityBot(commands.Bot):
         self.deadline_service = DeadlineService(self.deadline_repo)
         self.activity_service = ActivityService(self.activity_repo, self.task_repo)
         self.vault_service = VaultService(self.file_vault, self.activity_repo)
+        self.project_service = ProjectService(
+            self.project_repo,
+            self.task_repo,
+            self.deadline_repo,
+            self.activity_repo
+        )
 
     async def setup_hook(self) -> None:
         """Initializes database schema and mounts all dependency-injected cogs."""
@@ -73,7 +82,7 @@ class GroupAccountabilityBot(commands.Bot):
         await self.add_cog(DeadlinesCog(self, self.deadline_service))
         await self.add_cog(ReportsCog(self, self.activity_service))
         await self.add_cog(TrackerCog(self, self.activity_service, self.vault_service))
-        await self.add_cog(AdminCog(self))
+        await self.add_cog(AdminCog(self, self.project_service))
         logger.info("All Cogs mounted successfully.")
 
         # Sync Slash Commands
