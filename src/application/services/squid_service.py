@@ -189,6 +189,38 @@ class SquidService:
         """Resets all in-memory game sessions on bot reboot."""
         self._active_games.clear()
 
+    async def timeout_slacking_players(self, guild_id: str) -> list[EliminationResultDTO]:
+        """Eliminates all contestants who failed to reach the finish line before time expired."""
+        game = self._active_games.get(guild_id)
+        if not game:
+            return []
+
+        target = game.get("target", 100)
+        progress = game.get("progress", {})
+        finished_users = game.get("finished", set())
+
+        alive_players = await self.squid_repo.list_players(guild_id, alive_only=True)
+        eliminations = []
+        for player in alive_players:
+            if player.user_id not in finished_users and progress.get(player.user_id, 0) < target:
+                res = await self.eliminate_player(
+                    guild_id=guild_id,
+                    user_id=player.user_id,
+                    reason="Failed to reach the finish line in time",
+                    synthesize_audio=False
+                )
+                eliminations.append(res)
+        return eliminations
+
+    async def revive_all_players(self, guild_id: str) -> int:
+        """Restores all eliminated players to alive status for a fresh match."""
+        return await self.squid_repo.revive_all_players(guild_id)
+
+    async def reset_season(self, guild_id: str) -> None:
+        """Resets the season bounty pot and restarts the game cycle."""
+        await self.squid_repo.reset_season(guild_id)
+        self.end_red_light_game(guild_id)
+
     def _calculate_advance(self, round_num: int) -> int:
         """Dynamic step distance: narrows each round as tension increases."""
         base_min = max(5, 16 - (round_num - 1) * 2)

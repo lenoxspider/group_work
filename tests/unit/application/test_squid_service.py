@@ -100,5 +100,30 @@ class TestSquidService(unittest.IsolatedAsyncioTestCase):
         # Round 1 has higher max than Round 5
         self.assertGreater(max(dist_r1), min(dist_r5))
 
+    async def test_revive_all_players(self):
+        self.mock_repo.revive_all_players.return_value = 5
+        count = await self.service.revive_all_players("111")
+        self.assertEqual(count, 5)
+        self.mock_repo.revive_all_players.assert_called_once_with("111")
+
+    async def test_timeout_slacking_players(self):
+        p1 = SquidPlayer(guild_id="111", user_id="u1", player_number="001", is_alive=True)
+        p2 = SquidPlayer(guild_id="111", user_id="u2", player_number="002", is_alive=True)
+        season = SquidSeason(guild_id="111")
+        self.mock_repo.list_players.return_value = [p1, p2]
+        self.mock_repo.get_player.side_effect = lambda g, u: p1 if u == "u1" else p2
+        self.mock_repo.get_season.return_value = season
+
+        self.service.start_red_light_game("111", target=100)
+        # u1 finished (100m), u2 slacked (40m)
+        self.service._active_games["111"]["finished"].add("u1")
+        self.service._active_games["111"]["progress"]["u1"] = 100
+        self.service._active_games["111"]["progress"]["u2"] = 40
+
+        elims = await self.service.timeout_slacking_players("111")
+        self.assertEqual(len(elims), 1)
+        self.assertEqual(elims[0].user_id, "u2")
+        self.assertIn("Failed to reach the finish line", elims[0].reason)
+
 if __name__ == "__main__":
     unittest.main()

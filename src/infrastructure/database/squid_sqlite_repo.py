@@ -182,6 +182,32 @@ class SquidSqliteRepository(SquidRepository):
                 await db.rollback()
                 raise
 
+    async def revive_all_players(self, guild_id: str) -> int:
+        """Revives all eliminated contestants for a new game."""
+        query = """
+            UPDATE squid_players
+            SET is_alive = 1, elimination_reason = NULL, eliminated_at = NULL
+            WHERE guild_id = ?
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(query, (guild_id,))
+            await db.commit()
+            return cursor.rowcount
+
+    async def reset_season(self, guild_id: str) -> None:
+        """Resets the prize pot and restores default season configuration."""
+        query = """
+            INSERT INTO squid_seasons (guild_id, pot_amount, is_active, current_game)
+            VALUES (?, 0, 1, 'Red Light Green Light')
+            ON CONFLICT(guild_id) DO UPDATE SET
+                pot_amount = 0,
+                is_active = 1,
+                current_game = 'Red Light Green Light'
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(query, (guild_id,))
+            await db.commit()
+
     def _row_to_player(self, row: tuple) -> SquidPlayer:
         elim_at = datetime.fromisoformat(row[6]) if row[6] else None
         return SquidPlayer(

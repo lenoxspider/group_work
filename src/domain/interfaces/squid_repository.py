@@ -55,3 +55,11 @@ class SquidRepository(Protocol):
     ) -> None:
         """Atomically persists player elimination and increments season prize pool in a transaction."""
         ...
+
+    async def revive_all_players(self, guild_id: str) -> int:
+        """Restores all eliminated players back to alive status for a fresh match."""
+        ...
+
+    async def reset_season(self, guild_id: str) -> None:
+        """Resets the prize pot and season state back to initial values."""
+        ...

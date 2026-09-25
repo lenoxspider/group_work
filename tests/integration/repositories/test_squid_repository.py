@@ -108,5 +108,21 @@ class TestSquidSqliteRepository(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(updated_player.is_alive)
         self.assertEqual(updated_season.pot_amount, 100_000_000)
 
+    async def test_revive_all_players_and_reset_season(self):
+        p1 = SquidPlayer(guild_id="guild_1", user_id="u1", player_number="001", is_alive=False)
+        p2 = SquidPlayer(guild_id="guild_1", user_id="u2", player_number="002", is_alive=False)
+        await self.repo.save_player(p1)
+        await self.repo.save_player(p2)
+
+        revived_count = await self.repo.revive_all_players("guild_1")
+        self.assertEqual(revived_count, 2)
+
+        alive_list = await self.repo.list_players("guild_1", alive_only=True)
+        self.assertEqual(len(alive_list), 2)
+
+        await self.repo.reset_season("guild_1")
+        season = await self.repo.get_season("guild_1")
+        self.assertEqual(season.pot_amount, 0)
+
 if __name__ == "__main__":
     unittest.main()
