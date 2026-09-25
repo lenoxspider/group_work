@@ -62,11 +62,37 @@ class TestTaskEntity(unittest.TestCase):
         task_completed = make_task(hours_from_now=-2, is_completed=True)
         self.assertFalse(task_completed.is_overdue(now))
 
-    def test_mark_shame_logged(self):
-        task = make_task()
+    def test_needs_6h_reminder(self):
+        now = datetime.now(timezone.utc)
+        task = make_task(hours_from_now=5)
+        self.assertTrue(task.needs_6h_reminder(now))
+
+        task_far = make_task(hours_from_now=12)
+        self.assertFalse(task_far.needs_6h_reminder(now))
+
+    def test_extend_due_date_resets_reminders(self):
+        now = datetime.now(timezone.utc)
+        task = make_task(hours_from_now=2)
+        task.reminded_24h = True
+        task.reminded_6h = True
+        task.reminded_1h = True
+        task.shame_logged = True
+
+        new_due = task.due_date + timedelta(days=3)
+        task.extend_due_date(new_due)
+
+        self.assertEqual(task.due_date, new_due)
+        self.assertFalse(task.reminded_24h)
+        self.assertFalse(task.reminded_6h)
+        self.assertFalse(task.reminded_1h)
         self.assertFalse(task.shame_logged)
-        task.mark_shame_logged()
-        self.assertTrue(task.shame_logged)
+
+    def test_extend_due_date_earlier_raises_error(self):
+        now = datetime.now(timezone.utc)
+        task = make_task(hours_from_now=48)
+        earlier_due = task.due_date - timedelta(hours=1)
+        with self.assertRaises(ValidationError):
+            task.extend_due_date(earlier_due)
 
 if __name__ == "__main__":
     unittest.main()

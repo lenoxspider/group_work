@@ -100,8 +100,26 @@ class DatabaseManager:
                 )
             """)
 
+            # 6. Extension requests table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS extension_requests (
+                    request_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    guild_id TEXT NOT NULL,
+                    requester_id TEXT NOT NULL,
+                    proposed_due_date TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'PENDING',
+                    approvals TEXT NOT NULL DEFAULT '',
+                    rejections TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    resolved_at TEXT
+                )
+            """)
+
             # Migrations for existing databases
             migrations = [
+                ("tasks", "reminded_6h", "INTEGER DEFAULT 0"),
                 ("tasks", "is_in_progress", "INTEGER DEFAULT 0"),
                 ("tasks", "shame_logged", "INTEGER DEFAULT 0"),
                 ("member_activity", "on_time_tasks", "INTEGER DEFAULT 0"),

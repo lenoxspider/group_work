@@ -19,6 +19,7 @@ from src.infrastructure.database.task_sqlite_repo import SQLiteTaskRepository
 from src.infrastructure.database.deadline_sqlite_repo import SQLiteDeadlineRepository
 from src.infrastructure.database.activity_sqlite_repo import SQLiteActivityRepository
 from src.infrastructure.database.project_sqlite_repo import SQLiteProjectRepository
+from src.infrastructure.database.extension_sqlite_repo import SQLiteExtensionRepository
 from src.infrastructure.storage.local_file_vault import LocalFileVault
 
 from src.application.services.task_service import TaskService
@@ -26,6 +27,7 @@ from src.application.services.deadline_service import DeadlineService
 from src.application.services.activity_service import ActivityService
 from src.application.services.vault_service import VaultService
 from src.application.services.project_service import ProjectService
+from src.application.services.extension_service import ExtensionService
 
 from src.interface.cogs.tasks_cog import TasksCog
 from src.interface.cogs.deadlines_cog import DeadlinesCog
@@ -58,6 +60,7 @@ class GroupAccountabilityBot(commands.Bot):
         self.deadline_repo = SQLiteDeadlineRepository(settings.database_path)
         self.activity_repo = SQLiteActivityRepository(settings.database_path)
         self.project_repo = SQLiteProjectRepository(settings.database_path)
+        self.extension_repo = SQLiteExtensionRepository(settings.database_path)
         self.file_vault = LocalFileVault(settings.uploads_dir)
 
         # Application Services
@@ -65,6 +68,7 @@ class GroupAccountabilityBot(commands.Bot):
         self.deadline_service = DeadlineService(self.deadline_repo)
         self.activity_service = ActivityService(self.activity_repo, self.task_repo)
         self.vault_service = VaultService(self.file_vault, self.activity_repo)
+        self.extension_service = ExtensionService(self.extension_repo, self.task_repo)
         self.project_service = ProjectService(
             self.project_repo,
             self.task_repo,
@@ -78,7 +82,7 @@ class GroupAccountabilityBot(commands.Bot):
         await self.db_manager.initialize_schema()
 
         # Mount Cogs with injected services
-        await self.add_cog(TasksCog(self, self.task_service))
+        await self.add_cog(TasksCog(self, self.task_service, self.extension_service))
         await self.add_cog(DeadlinesCog(self, self.deadline_service))
         await self.add_cog(ReportsCog(self, self.activity_service))
         await self.add_cog(TrackerCog(self, self.activity_service, self.vault_service))

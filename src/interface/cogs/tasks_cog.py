@@ -18,12 +18,16 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from src.application.dtos.task_dtos import CreateTaskDTO
+from src.application.dtos.extension_dtos import CreateExtensionDTO
 from src.application.services.task_service import TaskService
+from src.application.services.extension_service import ExtensionService
 from src.domain.errors import AppError
 from src.interface.cogs.task_buttons import TaskActionView
+from src.interface.cogs.extension_buttons import ExtensionVoteView
 from src.interface.discord_formatters import (
     build_task_embed,
     build_wall_of_shame_embed,
+    build_extension_vote_embed,
     format_discord_timestamps,
     COLOR_PRIMARY,
     COLOR_WARNING,
@@ -33,12 +37,14 @@ from src.interface.discord_formatters import (
 logger = logging.getLogger("interface.cogs.tasks")
 
 class TasksCog(commands.Cog, name="Task Ledger"):
-    """Interface adapter for Task management commands and background reminders."""
+    """Interface adapter for Task management commands, extension voting, and escalating reminders."""
 
-    def __init__(self, bot: commands.Bot, task_service: TaskService):
+    def __init__(self, bot: commands.Bot, task_service: TaskService, extension_service: ExtensionService):
         self.bot = bot
         self.service = task_service
+        self.extension_service = extension_service
         self.bot.add_view(TaskActionView(task_service))
+        self.bot.add_view(ExtensionVoteView(extension_service))
         self.reminder_loop.start()
 
     def cog_unload(self):
@@ -144,6 +150,62 @@ class TasksCog(commands.Cog, name="Task Ledger"):
         except AppError as e:
             await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
 
+    @task_group.command(name="extend", description="Request a deadline extension with democratic team voting")
+    @app_commands.describe(
+        task_id="The ID of the task to extend (e.g. TASK-A1B2)",
+        new_due="Proposed new due date (YYYY-MM-DD or YYYY-MM-DD HH:MM)",
+        reason="Explanation of why an extension is necessary"
+    )
+    async def extend_task(
+        self,
+        interaction: discord.Interaction,
+        task_id: str,
+        new_due: str,
+        reason: str
+    ):
+        await interaction.response.defer()
+        new_due_dt = self._parse_due_date(new_due)
+        if not new_due_dt:
+            await interaction.followup.send(
+                "❌ **Invalid Date.** Format: `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`.",
+                ephemeral=True
+            )
+            return
+
+        guild = interaction.guild
+        guild_id = str(guild.id) if guild else "0"
+        tasks_ch = discord.utils.get(guild.text_channels, name="tasks") if guild else None
+
+        try:
+            clean_id = task_id.strip().upper()
+            dto = CreateExtensionDTO(
+                task_id=clean_id,
+                guild_id=guild_id,
+                requester_id=str(interaction.user.id),
+                proposed_due_date=new_due_dt,
+                reason=reason.strip()
+            )
+            res = await self.extension_service.request_extension(dto)
+            task = await self.service.get_task(res.task_id)
+
+            embed = build_extension_vote_embed(res, task.description)
+            view = ExtensionVoteView(self.extension_service)
+
+            if tasks_ch:
+                await tasks_ch.send(
+                    content=f"🗳️ **Extension Request for {interaction.user.mention}:**",
+                    embed=embed,
+                    view=view
+                )
+
+            await interaction.followup.send(
+                content=f"🗳️ Extension request `{res.request_id}` submitted for team voting in {tasks_ch.mention if tasks_ch else 'the channel'}!",
+                embed=embed,
+                view=view
+            )
+        except AppError as e:
+            await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
+
     @task_group.command(name="list", description="List pending tasks for this server")
     @app_commands.describe(member="Optional: filter by assigned team member")
     async def list_tasks(self, interaction: discord.Interaction, member: Optional[discord.Member] = None):
@@ -192,11 +254,34 @@ class TasksCog(commands.Cog, name="Task Ledger"):
 
     @tasks.loop(minutes=2)
     async def reminder_loop(self):
-        """Dispatches automated reminders and posts overdue items to the Wall of Shame."""
+        """Dispatches automated escalating reminders and posts overdue items to the Wall of Shame."""
         try:
             now = datetime.now(timezone.utc)
             actions = await self.service.evaluate_pending_reminders(now)
             for act in actions:
+                abs_ts, rel_ts = format_discord_timestamps(act.due_date)
+
+                # Tier 2 (T-6h): Channel Escalation Ping
+                if act.reminder_tier == "6h":
+                    guild = self.bot.get_guild(int(act.guild_id))
+                    if guild:
+                        tasks_ch = discord.utils.get(guild.text_channels, name="tasks")
+                        if tasks_ch:
+                            embed = discord.Embed(
+                                title=f"⚠️ Escalation Alert (T-6h): {act.task_id}",
+                                description=f"Task **{act.description}** assigned to <@{act.user_id}> is due in under 6 hours!\n\n**Deadline:** {abs_ts} ({rel_ts})",
+                                color=COLOR_WARNING,
+                                timestamp=now
+                            )
+                            embed.set_footer(text=f"Complete: /task complete {act.task_id} • Or request extension: /task extend")
+                            try:
+                                await tasks_ch.send(content=f"⚠️ Attention <@{act.user_id}>:", embed=embed)
+                            except Exception:
+                                pass
+                    await self.service.acknowledge_reminder(act.task_id, act.reminder_tier)
+                    continue
+
+                # Tier 1 (T-24h) & Tier 3 (T-1h): Direct Message
                 user = self.bot.get_user(int(act.user_id))
                 if not user:
                     try:
@@ -204,7 +289,6 @@ class TasksCog(commands.Cog, name="Task Ledger"):
                     except Exception:
                         continue
 
-                abs_ts, rel_ts = format_discord_timestamps(act.due_date)
                 color = COLOR_DANGER if act.reminder_tier == "1h" else COLOR_WARNING
                 title = f"{'🚨 Urgent ' if act.reminder_tier == '1h' else '⏰ '}Task Reminder: {act.task_id}"
 
@@ -214,7 +298,7 @@ class TasksCog(commands.Cog, name="Task Ledger"):
                     color=color,
                     timestamp=now
                 )
-                embed.set_footer(text=f"Mark complete with: /task complete {act.task_id}")
+                embed.set_footer(text=f"Complete: /task complete {act.task_id} • Request extension: /task extend")
                 try:
                     await user.send(embed=embed)
                     await self.service.acknowledge_reminder(act.task_id, act.reminder_tier)

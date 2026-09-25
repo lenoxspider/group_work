@@ -172,3 +172,39 @@ class TaskActionView(discord.ui.View):
             await interaction.followup.send(f"✅ Marked task `{result_dto.task_id}` completed!", ephemeral=True)
         except AppError as e:
             await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
+
+    @discord.ui.button(
+        label="Extend",
+        style=discord.ButtonStyle.secondary,
+        emoji="⏳",
+        custom_id="task_action_btn:extend"
+    )
+    async def extend_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        task_id = self._extract_task_id(interaction.message)
+        if not task_id:
+            await interaction.followup.send("❌ Could not identify task ID from card.", ephemeral=True)
+            return
+
+        try:
+            task = await self.service.get_task(task_id)
+            if task.is_completed:
+                await interaction.followup.send("✨ Task is already completed.", ephemeral=True)
+                return
+
+            if isinstance(interaction.user, discord.Member) and not self._is_authorized(interaction.user, task.assigned_to):
+                await interaction.followup.send(
+                    f"❌ Only the assignee (<@{task.assigned_to}>) or a team admin can request an extension.",
+                    ephemeral=True
+                )
+                return
+
+            await interaction.followup.send(
+                f"⏳ **Request Deadline Extension for `{task.task_id}`**\n"
+                f"To initiate team voting, run:\n"
+                f"`/task extend task_id:{task.task_id} new_due:YYYY-MM-DD reason:<why you need more time>`",
+                ephemeral=True
+            )
+        except AppError as e:
+            await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
+

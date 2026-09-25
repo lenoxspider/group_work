@@ -35,6 +35,7 @@ class SQLiteTaskRepository(TaskRepository):
             created_at=datetime.fromisoformat(row["created_at"]),
             completed_at=completed,
             reminded_24h=bool(row["reminded_24h"]),
+            reminded_6h=bool(row.get("reminded_6h", 0)),
             reminded_1h=bool(row["reminded_1h"]),
             is_in_progress=bool(row.get("is_in_progress", 0)),
             shame_logged=bool(row.get("shame_logged", 0))
@@ -47,8 +48,8 @@ class SQLiteTaskRepository(TaskRepository):
                 INSERT INTO tasks (
                     task_id, guild_id, channel_id, message_id, description,
                     assigned_to, due_date, created_at, completed_at,
-                    reminded_24h, reminded_1h, is_in_progress, shame_logged
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    reminded_24h, reminded_6h, reminded_1h, is_in_progress, shame_logged
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(task_id) DO UPDATE SET
                     channel_id = excluded.channel_id,
                     message_id = excluded.message_id,
@@ -57,6 +58,7 @@ class SQLiteTaskRepository(TaskRepository):
                     due_date = excluded.due_date,
                     completed_at = excluded.completed_at,
                     reminded_24h = excluded.reminded_24h,
+                    reminded_6h = excluded.reminded_6h,
                     reminded_1h = excluded.reminded_1h,
                     is_in_progress = excluded.is_in_progress,
                     shame_logged = excluded.shame_logged
@@ -64,8 +66,9 @@ class SQLiteTaskRepository(TaskRepository):
                 task.task_id, task.guild_id, task.channel_id, task.message_id,
                 task.description, task.assigned_to, task.due_date.isoformat(),
                 task.created_at.isoformat(), completed_str,
-                1 if task.reminded_24h else 0, 1 if task.reminded_1h else 0,
-                1 if task.is_in_progress else 0, 1 if task.shame_logged else 0
+                1 if task.reminded_24h else 0, 1 if task.reminded_6h else 0,
+                1 if task.reminded_1h else 0, 1 if task.is_in_progress else 0,
+                1 if task.shame_logged else 0
             ))
             await db.commit()
 
@@ -96,7 +99,12 @@ class SQLiteTaskRepository(TaskRepository):
                 return [self._row_to_entity(dict(r)) for r in rows]
 
     async def update_reminder(self, task_id: str, reminder_tier: str) -> None:
-        col = "reminded_24h" if reminder_tier == "24h" else "reminded_1h"
+        if reminder_tier == "24h":
+            col = "reminded_24h"
+        elif reminder_tier == "6h":
+            col = "reminded_6h"
+        else:
+            col = "reminded_1h"
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(f"UPDATE tasks SET {col} = 1 WHERE task_id = ?", (task_id,))
             await db.commit()
@@ -109,6 +117,15 @@ class SQLiteTaskRepository(TaskRepository):
     async def mark_shame_logged(self, task_id: str) -> None:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("UPDATE tasks SET shame_logged = 1 WHERE task_id = ?", (task_id,))
+            await db.commit()
+
+    async def update_due_date(self, task_id: str, new_due_date: datetime) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                UPDATE tasks
+                SET due_date = ?, reminded_24h = 0, reminded_6h = 0, reminded_1h = 0, shame_logged = 0
+                WHERE task_id = ?
+            """, (new_due_date.isoformat(), task_id))
             await db.commit()
 
     async def get_overdue_unshamed(self, now: Optional[datetime] = None) -> List[Task]:

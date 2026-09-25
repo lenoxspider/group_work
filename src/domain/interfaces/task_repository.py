@@ -46,3 +46,7 @@ class TaskRepository(Protocol):
     async def get_overdue_unshamed(self, now: Optional[datetime] = None) -> List[Task]:
         """Retrieves open overdue tasks that have not yet been shamed."""
         ...
+
+    async def update_due_date(self, task_id: str, new_due_date: datetime) -> None:
+        """Updates the due date and resets reminder and shame flags."""
+        ...

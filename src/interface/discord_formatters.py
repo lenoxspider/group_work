@@ -18,6 +18,7 @@ from src.application.dtos.task_dtos import TaskResultDTO, OverdueShameActionDTO
 from src.application.dtos.deadline_dtos import DeadlineResultDTO
 from src.application.dtos.report_dtos import MemberReportDTO, GuildReportDTO
 from src.application.dtos.project_dtos import ProjectStatusDTO, ProjectArchiveSummaryDTO
+from src.application.dtos.extension_dtos import ExtensionResultDTO
 from src.application.services.vault_service import VaultSubmissionResultDTO
 
 COLOR_PRIMARY = discord.Color.from_rgb(88, 101, 242)
@@ -241,3 +242,36 @@ def build_project_archive_embed(dto: ProjectArchiveSummaryDTO, guild_name: str) 
 
     embed.set_footer(text="Project archived • Great work everyone!")
     return embed
+
+def build_extension_vote_embed(dto: ExtensionResultDTO, task_desc: str) -> discord.Embed:
+    """Builds an interactive peer voting card for deadline extension requests."""
+    abs_ts, rel_ts = format_discord_timestamps(dto.proposed_due_date)
+    if dto.status == "APPROVED":
+        color = COLOR_SUCCESS
+        status_label = "✅ Approved by Majority (Deadline Extended)"
+    elif dto.status == "REJECTED":
+        color = COLOR_DANGER
+        status_label = "❌ Rejected by Majority (Original Deadline Maintained)"
+    else:
+        color = COLOR_PRIMARY
+        status_label = "⏳ Voting In Progress (Majority Decides)"
+
+    embed = discord.Embed(
+        title=f"🗳️ Extension Request Vote: {dto.request_id}",
+        description=f"<@{dto.requester_id}> has requested a deadline extension for task **{dto.task_id}**.",
+        color=color,
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.add_field(name="📋 Task Deliverable", value=task_desc, inline=False)
+    embed.add_field(name="⏰ Proposed Deadline", value=f"{abs_ts} ({rel_ts})", inline=False)
+    embed.add_field(name="📝 Reason for Extension", value=f"*{dto.reason}*", inline=False)
+    embed.add_field(
+        name="📊 Team Vote Tally",
+        value=f"👍 **Approve:** `{dto.approvals_count}`  |  👎 **Reject:** `{dto.rejections_count}`",
+        inline=True
+    )
+    embed.add_field(name="📌 Status", value=f"`{status_label}`", inline=True)
+    footer = "Voting concluded" if dto.is_resolved else f"Request ID: {dto.request_id} • Click buttons below to vote"
+    embed.set_footer(text=footer)
+    return embed
+

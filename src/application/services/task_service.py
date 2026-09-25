@@ -102,7 +102,7 @@ class TaskService:
 
     async def evaluate_overdue_tasks(self, current_time: datetime) -> List[OverdueShameActionDTO]:
         """Finds open tasks past due date and breaks user streaks."""
-        overdue_tasks = await self._task_repo.get_overdue_unshamed()
+        overdue_tasks = await self._task_repo.get_overdue_unshamed(current_time)
         actions: List[OverdueShameActionDTO] = []
 
         for task in overdue_tasks:
@@ -131,7 +131,7 @@ class TaskService:
         return [self._map_to_dto(t) for t in tasks]
 
     async def evaluate_pending_reminders(self, current_time: datetime) -> List[TaskReminderActionDTO]:
-        """Finds all tasks needing 24h or 1h reminders."""
+        """Finds all tasks needing 24h, 6h, or 1h escalating reminders."""
         tasks = await self._task_repo.get_all_pending()
         actions: List[TaskReminderActionDTO] = []
 
@@ -144,6 +144,15 @@ class TaskService:
                     description=task.description,
                     due_date=task.due_date,
                     reminder_tier="1h"
+                ))
+            elif task.needs_6h_reminder(current_time):
+                actions.append(TaskReminderActionDTO(
+                    task_id=task.task_id,
+                    guild_id=task.guild_id,
+                    user_id=task.assigned_to,
+                    description=task.description,
+                    due_date=task.due_date,
+                    reminder_tier="6h"
                 ))
             elif task.needs_24h_reminder(current_time):
                 actions.append(TaskReminderActionDTO(

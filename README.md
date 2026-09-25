@@ -22,12 +22,24 @@ This project strictly adheres to Domain-Driven Design (DDD) and Clean Architectu
 - Formats and posts an interactive task card into the `#tasks` channel with persistent action buttons:
   - 🔔 **Nudge Button**: Allows teammates to ping the assignee with a built-in 30-minute spam-prevention cooldown.
   - 🔄 **In Progress Toggle**: Assignee or team admin can toggle work status between `⏳ Pending` and `🔄 In Progress`.
+  - ⏳ **Extend Button**: Initiates a formal, team-voted extension request.
   - ✅ **One-Click Complete**: Immediately finishes the task, records on-time delivery status, updates streaks, and disables buttons.
-- Automatically schedules background DM reminders to the assignee at **T-24h** and **T-1h**.
+- **Escalating Reminders Ladder**:
+  - **Tier 1 (T-24h)**: Friendly DM reminder to the assignee.
+  - **Tier 2 (T-6h)**: Escalation alert ping in `#tasks` notifying the team.
+  - **Tier 3 (T-1h)**: High-urgency DM reminder with countdown.
+  - **Tier 4 (Overdue)**: Public shaming card posted to `#wall-of-shame`.
 - **Complete Task via Slash**: `/task complete task_id:<TASK-ID>` updates the embed and awards contribution points.
 - **List Tasks**: `/task list [member:<@member>]` lists open tasks across the project or for a specific teammate.
 
-### 2. 🚨 Wall of Shame & On-Time Streaks
+### 2. 🗳️ Extension Requests with Democratic Majority Voting
+- **Command**: `/task extend task_id:<TASK-ID> new_due:<YYYY-MM-DD [HH:MM]> reason:<TEXT>`
+- Assignee requests extra time on an active deliverable, logging a transparent paper trail.
+- Posts an interactive voting card into `#tasks` with `👍 Approve`, `👎 Reject`, and `🏁 Conclude Vote` buttons (`ExtensionVoteView`).
+- **Quorum & Resolution**: Majority of votes cast decides the outcome. Requester cannot vote on their own request.
+- **Automatic Due Date Update**: When approved, the task's due date is updated, all reminder thresholds are reset, and the assignee's on-time streak remains intact!
+
+### 3. 🚨 Wall of Shame & On-Time Streaks
 - **Channel**: `#wall-of-shame` (auto-provisioned with read-only display protection).
 - **Automated Overdue Detection**: Background loop scans every 2 minutes for delinquent tasks past their due date.
 - **Punishment & Shaming**: Automatically posts a public red shaming card pinging the delinquent member with elapsed overdue hours.

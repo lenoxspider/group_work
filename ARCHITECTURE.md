@@ -38,16 +38,18 @@ discord_group_work/
 │   │   ├── errors.py                # Domain exception hierarchy (EntityNotFound, ValidationError)
 │   │   ├── entities/
 │   │   │   ├── __init__.py
-│   │   │   ├── task.py              # Task aggregate: status transitions, reminder thresholds
+│   │   │   ├── task.py              # Task aggregate: status transitions, reminder thresholds, extension
 │   │   │   ├── deadline.py          # Milestone aggregate: alert thresholds, countdown status
-│   │   │   ├── member_activity.py   # Member metrics aggregate: activity score calculation
-│   │   │   └── project_state.py     # Project aggregate: sprint lifecycle (ACTIVE, ARCHIVED)
+│   │   │   ├── member_activity.py   # Member metrics aggregate: activity score calculation, streaks, ranks
+│   │   │   ├── project_state.py     # Project aggregate: sprint lifecycle (ACTIVE, ARCHIVED)
+│   │   │   └── extension_request.py # ExtensionRequest aggregate: peer approvals, majority resolution
 │   │   └── interfaces/
 │   │       ├── __init__.py
 │   │       ├── task_repository.py   # TaskRepository abstract protocol/interface
 │   │       ├── deadline_repository.py# DeadlineRepository abstract protocol/interface
 │   │       ├── activity_repository.py# ActivityRepository abstract protocol/interface
 │   │       ├── project_repository.py # ProjectRepository abstract protocol/interface
+│   │       ├── extension_repository.py# ExtensionRepository abstract protocol/interface
 │   │       └── vault_storage.py     # VaultStorage abstract protocol/interface
 │   │
 │   ├── application/                 # USE CASES: Orchestration, DTOs
@@ -57,14 +59,16 @@ discord_group_work/
 │   │   │   ├── task_dtos.py         # CreateTaskDTO, TaskResultDTO, ReminderEvaluationDTO
 │   │   │   ├── deadline_dtos.py     # CreateDeadlineDTO, DeadlineResultDTO, AlertEvaluationDTO
 │   │   │   ├── report_dtos.py       # MemberReportDTO, GuildReportDTO
-│   │   │   └── project_dtos.py      # ProjectStatusDTO, ProjectArchiveSummaryDTO
+│   │   │   ├── project_dtos.py      # ProjectStatusDTO, ProjectArchiveSummaryDTO
+│   │   │   └── extension_dtos.py    # CreateExtensionDTO, CastVoteDTO, ExtensionResultDTO
 │   │   └── services/
 │   │       ├── __init__.py
 │   │       ├── task_service.py      # Task use cases (assign, complete, list, process reminders)
 │   │       ├── deadline_service.py  # Milestone use cases (schedule, evaluate alerts, complete)
 │   │       ├── activity_service.py  # Metrics use cases (record message, generate reports)
 │   │       ├── vault_service.py     # Vault use cases (verify SHA-256, store, record submission)
-│   │       └── project_service.py   # Lifecycle use cases (status dashboard, finish/archive)
+│   │       ├── project_service.py   # Lifecycle use cases (status dashboard, finish/archive)
+│   │       └── extension_service.py # Extension use cases (request, cast vote, majority conclude)
 │   │
 │   ├── infrastructure/              # ADAPTERS: SQLite DB, File Vault
 │   │   ├── __init__.py
@@ -74,7 +78,8 @@ discord_group_work/
 │   │   │   ├── task_sqlite_repo.py  # SQLite implementation of TaskRepository
 │   │   │   ├── deadline_sqlite_repo.py# SQLite implementation of DeadlineRepository
 │   │   │   ├── activity_sqlite_repo.py# SQLite implementation of ActivityRepository
-│   │   │   └── project_sqlite_repo.py # SQLite implementation of ProjectRepository
+│   │   │   ├── project_sqlite_repo.py # SQLite implementation of ProjectRepository
+│   │   │   └── extension_sqlite_repo.py# SQLite implementation of ExtensionRepository
 │   │   └── storage/
 │   │       ├── __init__.py
 │   │       └── local_file_vault.py  # Local filesystem implementation of VaultStorage
@@ -85,8 +90,9 @@ discord_group_work/
 │       ├── discord_formatters.py    # Discord Embed card formatters and relative timestamps
 │       └── cogs/
 │           ├── __init__.py
-│           ├── task_buttons.py      # Persistent TaskActionView (Nudge, In-Progress, Complete buttons)
-│           ├── tasks_cog.py         # /task commands, Wall of Shame dispatcher & reminder loop
+│           ├── task_buttons.py      # Persistent TaskActionView (Nudge, In-Progress, Complete, Extend)
+│           ├── extension_buttons.py # Persistent ExtensionVoteView (Approve, Reject, Conclude)
+│           ├── tasks_cog.py         # /task commands, extension voting, escalation & Wall of Shame loop
 │           ├── deadlines_cog.py     # /deadline add, /deadline list & 15m countdown update loop
 │           ├── reports_cog.py       # /report (team leaderboard, military ranks & on-time streaks)
 │           ├── tracker_cog.py       # on_message counting & in-server /submit deliverable receiver
@@ -98,15 +104,21 @@ discord_group_work/
 │   │   ├── domain/
 │   │   │   ├── test_task_entity.py
 │   │   │   ├── test_deadline_entity.py
-│   │   │   └── test_activity_entity.py
+│   │   │   ├── test_activity_entity.py
+│   │   │   ├── test_project_state_entity.py
+│   │   │   └── test_extension_entity.py
 │   │   └── application/
 │   │       ├── test_task_service.py
 │   │       ├── test_deadline_service.py
-│   │       └── test_vault_service.py
+│   │       ├── test_vault_service.py
+│   │       ├── test_project_service.py
+│   │       └── test_extension_service.py
 │   └── integration/
 │       └── repositories/
 │           ├── test_task_repository.py
-│           └── test_activity_repository.py
+│           ├── test_activity_repository.py
+│           ├── test_project_repository.py
+│           └── test_extension_repository.py
 │
 ├── uploads/
 │   └── .gitkeep                     # Target directory for versioned, hashed deliverables

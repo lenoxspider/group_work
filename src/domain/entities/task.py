@@ -29,6 +29,7 @@ class Task:
     created_at: datetime
     completed_at: Optional[datetime] = None
     reminded_24h: bool = False
+    reminded_6h: bool = False
     reminded_1h: bool = False
     is_in_progress: bool = False
     shame_logged: bool = False
@@ -63,6 +64,18 @@ class Task:
             raise TaskAlreadyCompletedError(f"Cannot change progress state on completed task {self.task_id}.")
         self.is_in_progress = in_progress
 
+    def extend_due_date(self, new_due_date: datetime) -> None:
+        """Extends task deadline and resets reminder thresholds."""
+        if self.is_completed:
+            raise TaskAlreadyCompletedError(f"Cannot extend completed task {self.task_id}.")
+        if new_due_date <= self.due_date:
+            raise ValidationError("Proposed extension date must be strictly after the current due date.")
+        self.due_date = new_due_date
+        self.reminded_24h = False
+        self.reminded_6h = False
+        self.reminded_1h = False
+        self.shame_logged = False
+
     def mark_shame_logged(self) -> None:
         """Marks that this overdue task has been posted to Wall of Shame."""
         self.shame_logged = True
@@ -92,6 +105,12 @@ class Task:
         if self.is_completed or self.reminded_24h:
             return False
         return self.is_due_within(current_time, timedelta(hours=24))
+
+    def needs_6h_reminder(self, current_time: datetime) -> bool:
+        """Evaluates if T-6h escalation reminder is due and unsent."""
+        if self.is_completed or self.reminded_6h:
+            return False
+        return self.is_due_within(current_time, timedelta(hours=6))
 
     def needs_1h_reminder(self, current_time: datetime) -> bool:
         """Evaluates if T-1h reminder is due and unsent."""
