@@ -36,59 +36,107 @@ class AdminCog(commands.Cog, name="Administration"):
 
     project_group = app_commands.Group(name="project", description="Group project and sprint lifecycle commands")
 
-    async def _ensure_channels_with_protection(self, guild: discord.Guild) -> List[discord.TextChannel]:
-        """Creates or updates #tasks, #deadlines, #submissions, and #wall-of-shame with read-only display protection."""
+    async def _ensure_channels_and_roles(self, guild: discord.Guild) -> List[discord.TextChannel]:
+        """Creates or updates all project and Squid Game channels and roles with appropriate protections."""
+        # 1. Provision Player and Spectator roles
+        if guild.me.guild_permissions.manage_roles:
+            if not discord.utils.get(guild.roles, name="Player"):
+                try:
+                    await guild.create_role(
+                        name="Player",
+                        color=discord.Color.from_rgb(3, 122, 118),
+                        mentionable=True,
+                        reason="Squid Game accountability role"
+                    )
+                except Exception as e:
+                    logger.warning("Could not auto-create Player role in guild %s: %s", guild.id, e)
+
+            if not discord.utils.get(guild.roles, name="Spectator"):
+                try:
+                    await guild.create_role(
+                        name="Spectator",
+                        color=discord.Color.from_rgb(120, 120, 120),
+                        mentionable=True,
+                        reason="Squid Game spectator role"
+                    )
+                except Exception as e:
+                    logger.warning("Could not auto-create Spectator role in guild %s: %s", guild.id, e)
+
+        # 2. Provision Channels
         channel_configs = [
-            ("tasks", "📋 Group task ledger. Read-only display. Use /task to interact."),
-            ("deadlines", "🎯 Major project milestones and live countdowns. Read-only display. Use /deadline to interact."),
-            ("submissions", "📥 Verified deliverable submission vault. Read-only display. Use /submit to upload."),
-            ("wall-of-shame", "🚨 Public accountability ledger. Overdue tasks and broken streaks are recorded here.")
+            ("tasks", "📋 Group task ledger. Read-only display. Use /task to interact.", False),
+            ("deadlines", "🎯 Major project milestones and live countdowns. Read-only display. Use /deadline to interact.", False),
+            ("submissions", "📥 Verified deliverable submission vault. Read-only display. Use /submit to upload.", False),
+            ("wall-of-shame", "🚨 Public accountability ledger. Overdue tasks and broken streaks are recorded here.", False),
+            ("game-hub", "🎮 Squid Game Arena & Minigame Hub. Type /squid join to get your 3-digit player number.", True),
+            ("spectators", "💀 Observation deck for eliminated players.", False)
         ]
 
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(
-                view_channel=True,
-                read_message_history=True,
-                send_messages=False,
-                add_reactions=True
-            ),
-            guild.me: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                manage_messages=True,
-                embed_links=True,
-                attach_files=True,
-                read_message_history=True
-            )
-        }
-
         created_or_found = []
-        for name, topic in channel_configs:
+        for name, topic, allow_chat in channel_configs:
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(
+                    view_channel=True,
+                    read_message_history=True,
+                    send_messages=allow_chat,
+                    add_reactions=True
+                ),
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    manage_messages=True,
+                    embed_links=True,
+                    attach_files=True,
+                    read_message_history=True
+                )
+            }
+
             ch = discord.utils.get(guild.text_channels, name=name)
+            is_new = False
             if not ch and guild.me.guild_permissions.manage_channels:
                 try:
                     ch = await guild.create_text_channel(name=name, topic=topic, overwrites=overwrites)
+                    is_new = True
                 except Exception as e:
                     logger.warning("Could not auto-create #%s in guild %s: %s", name, guild.name, e)
             elif ch and guild.me.guild_permissions.manage_channels:
                 try:
                     await ch.edit(topic=topic, overwrites=overwrites)
                 except Exception as e:
-                    logger.warning("Could not enforce permission overwrites on #%s: %s", name, e)
+                    logger.warning("Could not enforce permissions on #%s: %s", name, e)
 
             if ch:
                 created_or_found.append(ch)
+                if is_new and name == "game-hub":
+                    welcome_embed = discord.Embed(
+                        title="○ △ □ SQUID GAME ARENA • INITIALIZED",
+                        description=(
+                            "Welcome to the accountability arena.\n\n"
+                            "**How to play:**\n"
+                            "• Type `/squid join` to enroll and receive your 3-digit tag (`001`–`456`).\n"
+                            "• Type `/squid status` to view the live piggy bank prize pool and survivor count.\n"
+                            "• Type `/move` to take steps during active Red Light Green Light rounds.\n"
+                            "• **Warning:** Missing your project deadlines will result in immediate termination."
+                        ),
+                        color=discord.Color.from_rgb(255, 0, 144)
+                    )
+                    welcome_embed.set_footer(text="Obey all directives from the Masked Guards.")
+                    try:
+                        await ch.send(embed=welcome_embed)
+                    except Exception:
+                        pass
+
         return created_or_found
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):
-        """Auto-provisions group work channels with read-only protection on joining a new server."""
-        logger.info("Bot joined guild %s (%s). Provisioning protected channels...", guild.name, guild.id)
-        await self._ensure_channels_with_protection(guild)
+        """Auto-provisions group work channels and roles on joining a new server."""
+        logger.info("Bot joined guild %s (%s). Provisioning channels and roles...", guild.name, guild.id)
+        await self._ensure_channels_and_roles(guild)
 
     @app_commands.command(
         name="setup",
-        description="Verify and protect #tasks, #deadlines, and #submissions channels with read-only permissions"
+        description="Provision all project channels, Squid Game arena, and roles at once"
     )
     @app_commands.default_permissions(manage_channels=True)
     async def setup_channels(self, interaction: discord.Interaction):
@@ -98,28 +146,30 @@ class AdminCog(commands.Cog, name="Administration"):
             await interaction.followup.send("❌ Must be run in a server.", ephemeral=True)
             return
 
-        channels = await self._ensure_channels_with_protection(guild)
+        channels = await self._ensure_channels_and_roles(guild)
         ch_list = ", ".join(c.mention for c in channels) if channels else "None"
 
         embed = discord.Embed(
-            title="🛠️ Group Accountability Channels Configured",
-            description=f"Channels verified with **Read-Only Display Protection**:\n\n{ch_list}",
+            title="🛠️ Server Environment Fully Configured",
+            description=f"All channels and roles have been provisioned:\n\n{ch_list}",
             color=COLOR_SUCCESS
         )
         embed.add_field(
-            name="🔒 Display Protection Active",
-            value="Members can view tasks, countdowns, and shaming alerts cleanly without chat clutter. Use slash commands to interact.",
-            inline=False
+            name="🔒 Accountability Channels (Read-Only)",
+            value="• `#tasks` — Live task ledger\n• `#deadlines` — Pinned countdowns\n• `#submissions` — Verified file vault\n• `#wall-of-shame` — Overdue warnings",
+            inline=True
         )
         embed.add_field(
-            name="Available Commands",
+            name="🎮 Squid Game Arena (Interactive)",
+            value="• `#game-hub` — Lobby, announcements, minigames & elimination feed\n• `#spectators` — Fallen players observation deck",
+            inline=True
+        )
+        embed.add_field(
+            name="Quick Start Actions",
             value=(
-                "• `/task add` — Assign tasks with auto-reminders and interactive buttons\n"
-                "• `/deadline add` — Live pinned countdowns\n"
-                "• `/submit` — Submit deliverable files with SHA-256 verification\n"
-                "• `/report` — Anti-free-riding contribution scoreboard, ranks & streaks\n"
-                "• `/project status` — View overall project progress\n"
-                "• `/project finish` — Conclude project and archive channels"
+                "1. Head over to <#game-hub> and type `/squid join` to claim your player number.\n"
+                "2. Assign group tasks with `/task add`.\n"
+                "3. View team rankings and on-time streaks with `/report`."
             ),
             inline=False
         )
