@@ -42,20 +42,24 @@ class EspeakSpeechSynthesizer(SpeechSynthesizer):
 
         cmd = [
             self.binary_path,
+            "-b", "1",
             "-v", voice_arg,
             "-s", str(profile.speed),
             "-p", str(profile.pitch),
-            "-w", temp_wav_path,
-            text
+            "-w", temp_wav_path
         ]
 
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd,
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            stdout, stderr = await process.communicate()
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(input=text.encode("utf-8")),
+                timeout=15.0
+            )
 
             if process.returncode != 0:
                 err_msg = stderr.decode(errors="replace").strip()

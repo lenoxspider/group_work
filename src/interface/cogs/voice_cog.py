@@ -60,7 +60,12 @@ class VoiceCog(commands.Cog, name="Voice Synthesis"):
         tone: Optional[app_commands.Choice[str]] = None,
         lang: Optional[app_commands.Choice[str]] = None
     ):
-        await interaction.response.defer()
+        try:
+            await interaction.response.defer()
+        except discord.NotFound:
+            logger.warning("Interaction expired before deferral (Discord 3-second limit exceeded).")
+            return
+
         selected_tone = tone.value if tone else "serious"
         selected_lang = lang.value if lang else "en-us"
 
@@ -86,10 +91,16 @@ class VoiceCog(commands.Cog, name="Voice Synthesis"):
                 embed=embed
             )
         except AppError as e:
-            await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
+            try:
+                await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
+            except discord.NotFound:
+                pass
         except Exception as e:
             logger.error("Failed to synthesize voice message: %s", e, exc_info=True)
-            await interaction.followup.send("❌ Internal error during speech synthesis.", ephemeral=True)
+            try:
+                await interaction.followup.send("❌ Internal error during speech synthesis.", ephemeral=True)
+            except discord.NotFound:
+                pass
 
 async def setup(bot: commands.Bot):
     # Cog is registered in bot.py setup_hook

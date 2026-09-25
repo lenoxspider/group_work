@@ -33,6 +33,7 @@ class TestSpeechSynthesizer(unittest.IsolatedAsyncioTestCase):
             self.assertGreater(len(en_wav), 44)
             self.assertEqual(en_wav[:4], b"RIFF")
             self.assertEqual(en_wav[8:12], b"WAVE")
+            self.assertGreater(max(en_wav[44:]), 0)
         except Exception as e:
             self.skipTest(f"espeak-ng binary not accessible: {e}")
 
@@ -42,6 +43,7 @@ class TestSpeechSynthesizer(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(ru_wav), 44)
         self.assertEqual(ru_wav[:4], b"RIFF")
         self.assertEqual(ru_wav[8:12], b"WAVE")
+        self.assertGreater(max(ru_wav[44:]), 0)
 
 if __name__ == "__main__":
     unittest.main()
