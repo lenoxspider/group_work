@@ -9,6 +9,7 @@ What it does NOT do:
 - Does NOT execute game rules or database operations.
 """
 
+from typing import Optional
 from datetime import datetime, timezone
 import discord
 from src.application.dtos.squid_dtos import (
@@ -21,28 +22,41 @@ SQUID_PINK = discord.Color.from_rgb(255, 0, 144)      # #FF0090 Iconic hot pink
 SQUID_TEAL = discord.Color.from_rgb(3, 122, 118)      # #037A76 Guard / track teal
 SQUID_DARK = discord.Color.from_rgb(15, 15, 15)
 
-def build_squid_enrollment_embed(dto: PlayerResultDTO) -> discord.Embed:
-    """Creates a player registration card with assigned 3-digit tag."""
+def render_progress_bar(current: int, target: int, length: int = 10) -> str:
+    """Generates an ASCII progress bar for field positioning."""
+    clamped = max(0, min(current, target))
+    ratio = clamped / target if target > 0 else 0
+    filled = int(round(ratio * length))
+    bar = "█" * filled + "░" * (length - filled)
+    percent = int(ratio * 100)
+    return f"`[{bar}] {percent}%` ({clamped}/{target}m)"
+
+def build_squid_enrollment_embed(dto: PlayerResultDTO, avatar_url: Optional[str] = None) -> discord.Embed:
+    """Creates a player registration card with assigned 3-digit tag and avatar."""
     embed = discord.Embed(
         title="○ △ □ SQUID GAME • REGISTRATION CONFIRMED",
         description=f"Welcome to the games, <@{dto.user_id}>.\nYour identity has been cataloged.",
         color=SQUID_PINK,
         timestamp=datetime.now(timezone.utc)
     )
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
     embed.add_field(name="🏷️ Assigned Identifier", value=f"**`{dto.display_tag}`**", inline=True)
     embed.add_field(name="❤️ Vital Status", value="`ALIVE (🟢)`", inline=True)
     embed.add_field(name="🔥 Survival Streak", value=f"`{dto.survival_streak} games`", inline=True)
     embed.set_footer(text="Elimination on terminal overdue task • Follow all guard commands")
     return embed
 
-def build_squid_elimination_embed(dto: EliminationResultDTO) -> discord.Embed:
-    """Creates a death notification card with reason and bounty contribution."""
+def build_squid_elimination_embed(dto: EliminationResultDTO, avatar_url: Optional[str] = None) -> discord.Embed:
+    """Creates a death notification card with reason, bounty contribution, and avatar."""
     embed = discord.Embed(
         title="○ △ □ PLAYER ELIMINATED",
         description=f"**`{dto.display_tag}` (<@{dto.user_id}>) HAS BEEN ELIMINATED.**",
         color=SQUID_PINK,
         timestamp=datetime.now(timezone.utc)
     )
+    if avatar_url:
+        embed.set_thumbnail(url=avatar_url)
     embed.add_field(name="💀 Cause of Elimination", value=f"`{dto.reason}`", inline=True)
     embed.add_field(name="💰 Added to Piggy Bank", value="`+₩ 100,000,000`", inline=True)
     embed.add_field(name="🏆 Total Accumulated Pot", value=f"**`{dto.pot_formatted}`**", inline=False)
@@ -64,16 +78,22 @@ def build_squid_status_embed(dto: SquidStatusDTO) -> discord.Embed:
     embed.set_footer(text="Stay on schedule. Missed deliverables result in termination.")
     return embed
 
-def build_red_light_embed(light: str, target: int, progress: dict) -> discord.Embed:
-    """Builds the live Red Light Green Light track status embed."""
+def build_red_light_embed(
+    light: str,
+    target: int,
+    progress: dict,
+    round_num: int = 1,
+    max_rounds: int = 5
+) -> discord.Embed:
+    """Builds the live Red Light Green Light track status embed with ASCII progress bars."""
     if light == "GREEN":
         color = discord.Color.green()
-        title = "🟢 GREEN LIGHT • ADVANCE NOW!"
-        desc = "Type `/move` to advance across the field. **Stop when the doll turns.**"
+        title = f"🟢 GREEN LIGHT • ROUND {round_num}/{max_rounds} 🔊"
+        desc = "Type `/move` to advance across the field. **Stop when the doll turns.**\n*Doll is singing...*"
     else:
         color = discord.Color.red()
-        title = "🔴 RED LIGHT • REMAIN STILL!"
-        desc = "🚨 **DO NOT MOVE.** Any `/move` executed now triggers **instant elimination!**"
+        title = f"🔴 RED LIGHT • ROUND {round_num}/{max_rounds} 🚨"
+        desc = "🚨 **DO NOT MOVE.** Any `/move` executed now triggers **instant elimination!**\n*Sensors active — DO NOT BLINK.*"
 
     embed = discord.Embed(
         title=title,
@@ -83,13 +103,16 @@ def build_red_light_embed(light: str, target: int, progress: dict) -> discord.Em
     )
     leaderboard_lines = []
     for user_id, dist in sorted(progress.items(), key=lambda x: x[1], reverse=True)[:10]:
-        finished = "🏁 FINISHED" if dist >= target else f"{dist}/{target}m"
-        leaderboard_lines.append(f"<@{user_id}>: `{finished}`")
+        bar_str = render_progress_bar(dist, target, length=8)
+        if dist >= target:
+            leaderboard_lines.append(f"🏁 <@{user_id}>: **FINISHED** {bar_str}")
+        else:
+            leaderboard_lines.append(f"🏃 <@{user_id}>: {bar_str}")
 
     embed.add_field(
         name="🏃 Field Positions",
-        value="\n".join(leaderboard_lines) if leaderboard_lines else "*No movements yet.*",
+        value="\n".join(leaderboard_lines) if leaderboard_lines else "*No movements yet. Use /move during green light!*",
         inline=False
     )
-    embed.set_footer(text=f"Target distance: {target}m")
+    embed.set_footer(text=f"Target distance: {target}m • Round {round_num} of {max_rounds}")
     return embed

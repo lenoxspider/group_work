@@ -43,7 +43,11 @@ discord_group_work/
 │   │   │   ├── member_activity.py   # Member metrics aggregate: activity score calculation, streaks, ranks
 │   │   │   ├── member_preference.py # Member preference aggregate: IANA timezone, quiet hours (DND) window
 │   │   │   ├── project_state.py     # Project aggregate: sprint lifecycle (ACTIVE, ARCHIVED)
-│   │   │   └── extension_request.py # ExtensionRequest aggregate: peer approvals, majority resolution
+│   │   │   ├── extension_request.py # ExtensionRequest aggregate: peer approvals, majority resolution
+│   │   │   ├── squid_player.py      # SquidPlayer aggregate: vital status, player numbers (001-456), streaks
+│   │   │   ├── squid_season.py      # SquidSeason aggregate: piggy bank pot calculation, bounty increments
+│   │   │   ├── guard_voice.py       # Masked guard & doll speech scripts, vocal profiles
+│   │   │   └── movement_anomaly.py  # MovementAnomaly value object: anti-cheat audit trails & latency grace tracking
 │   │   └── interfaces/
 │   │       ├── __init__.py
 │   │       ├── task_repository.py   # TaskRepository abstract protocol/interface

@@ -63,7 +63,8 @@ class SquidCog(commands.GroupCog, group_name="squid"):
         dto = EnrollPlayerDTO(guild_id=str(interaction.guild_id), user_id=str(interaction.user.id))
         try:
             result = await self.squid_service.enroll_player(dto)
-            embed = build_squid_enrollment_embed(result)
+            avatar_url = interaction.user.display_avatar.url if interaction.user else None
+            embed = build_squid_enrollment_embed(result, avatar_url=avatar_url)
             await interaction.followup.send(embed=embed)
         except AppError as e:
             await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
@@ -129,7 +130,8 @@ class SquidCog(commands.GroupCog, group_name="squid"):
                 reason=reason,
                 synthesize_audio=True
             )
-            embed = build_squid_elimination_embed(result)
+            avatar_url = member.display_avatar.url if member else None
+            embed = build_squid_elimination_embed(result, avatar_url=avatar_url)
             if result.audio_bytes:
                 await self.audio_deliverer.deliver(
                     target=interaction,
@@ -178,13 +180,22 @@ class SquidCog(commands.GroupCog, group_name="squid"):
         self._running_tasks[guild_id] = task
 
     async def _run_automated_session(self, channel, guild_id: str):
-        """Runs the automated Red Light Green Light background cycle."""
+        """Runs the automated Red Light Green Light background cycle with in-place edits and pre-cached audio."""
         try:
             self.squid_service.start_red_light_game(guild_id, target=100)
-            if self.synthesizer:
+            await self.squid_service.preload_audio_cache()
+
+            intro_audio = self.squid_service.get_cached_audio("intro")
+            if not intro_audio and self.synthesizer:
                 script = GuardVoiceLines.game_announcement("Red Light Green Light")
                 intro_audio = await self.synthesizer.synthesize(script, GUARD_PROFILE)
-                await self.audio_deliverer.deliver(channel, intro_audio, "intro.wav", content="🚨 **Game beginning in 5 seconds!**")
+
+            track_msg = await channel.send(
+                "🎮 **Red Light Green Light starting in 5 seconds!** Listen closely to doll audio cues.",
+                embed=build_red_light_embed("GREEN", 100, {}, round_num=1, max_rounds=5)
+            )
+            if intro_audio:
+                await self.audio_deliverer.deliver(channel, intro_audio, "intro.wav")
             await asyncio.sleep(5.0)
 
             for round_num in range(1, 6):
@@ -193,32 +204,60 @@ class SquidCog(commands.GroupCog, group_name="squid"):
                     break
 
                 # 1. GREEN LIGHT
-                self.squid_service.set_light(guild_id, "GREEN")
-                green_audio = None
-                if self.synthesizer:
-                    try:
-                        green_audio = await self.synthesizer.synthesize(GuardVoiceLines.green_light_korean(), DOLL_PROFILE)
-                    except Exception:
-                        green_audio = await self.synthesizer.synthesize(GuardVoiceLines.green_light_english(), GUARD_PROFILE)
-                embed = build_red_light_embed("GREEN", game.get("target", 100), game.get("progress", {}))
+                self.squid_service.set_light(guild_id, "GREEN", round_num=round_num)
+                green_embed = build_red_light_embed(
+                    "GREEN",
+                    game.get("target", 100),
+                    game.get("progress", {}),
+                    round_num=round_num,
+                    max_rounds=5
+                )
+                try:
+                    await track_msg.edit(content=None, embed=green_embed)
+                    await track_msg.clear_reactions()
+                    await track_msg.add_reaction("🔊")
+                except Exception:
+                    track_msg = await channel.send(embed=green_embed)
+
+                green_audio = (
+                    self.squid_service.get_cached_audio("green_korean")
+                    or self.squid_service.get_cached_audio("green_english")
+                )
                 if green_audio:
-                    await self.audio_deliverer.deliver(channel, green_audio, "doll_green.wav", embed=embed)
-                else:
-                    await channel.send(embed=embed)
-                await asyncio.sleep(random.uniform(4.5, 7.0))
+                    await self.audio_deliverer.deliver(channel, green_audio, "doll_green.wav")
+
+                # Dynamic doll chant speed: faster each round
+                chant_duration = max(3.5, 6.5 - (round_num * 0.5)) + random.uniform(-0.3, 0.3)
+                await asyncio.sleep(chant_duration)
 
                 # 2. RED LIGHT
-                self.squid_service.set_light(guild_id, "RED")
-                red_audio = await self.synthesizer.synthesize(GuardVoiceLines.red_light(), GUARD_PROFILE) if self.synthesizer else None
-                embed = build_red_light_embed("RED", game.get("target", 100), game.get("progress", {}))
+                self.squid_service.set_light(guild_id, "RED", round_num=round_num)
+                game = self.squid_service.get_active_game(guild_id)
+                red_embed = build_red_light_embed(
+                    "RED",
+                    game.get("target", 100) if game else 100,
+                    game.get("progress", {}) if game else {},
+                    round_num=round_num,
+                    max_rounds=5
+                )
+                try:
+                    await track_msg.edit(content=None, embed=red_embed)
+                    await track_msg.clear_reactions()
+                    await track_msg.add_reaction("🚨")
+                except Exception:
+                    track_msg = await channel.send(embed=red_embed)
+
+                red_audio = self.squid_service.get_cached_audio("red")
                 if red_audio:
-                    await self.audio_deliverer.deliver(channel, red_audio, "doll_red.wav", embed=embed)
-                else:
-                    await channel.send(embed=embed)
-                await asyncio.sleep(random.uniform(3.5, 5.0))
+                    await self.audio_deliverer.deliver(channel, red_audio, "doll_red.wav")
+
+                red_duration = random.uniform(3.5, 5.0)
+                await asyncio.sleep(red_duration)
 
             self.squid_service.end_red_light_game(guild_id)
-            await channel.send("🏁 **Red Light Green Light session completed!** Check `/squid status` for survivors and updated prize pool.")
+            final_status = await self.squid_service.get_status(guild_id)
+            summary_embed = build_squid_status_embed(final_status)
+            await channel.send("🏁 **Session completed!** Final arena metrics:", embed=summary_embed)
         except asyncio.CancelledError:
             logger.info("Red light automated session cancelled for guild %s", guild_id)
         except Exception as e:
@@ -239,6 +278,7 @@ class MoveCommandCog(commands.Cog):
         self.audio_deliverer = audio_deliverer
 
     @app_commands.command(name="move", description="Take steps in Red Light Green Light (Safe only during Green Light!)")
+    @app_commands.checks.cooldown(1, 1.0, key=lambda i: (i.guild_id, i.user.id))
     async def move(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer()
@@ -254,6 +294,9 @@ class MoveCommandCog(commands.Cog):
                     description=f"🚨 **`{res.player_number}` (<@{res.user_id}>) MOVED DURING RED LIGHT!**\nPlayer has been terminated.",
                     color=discord.Color.from_rgb(255, 0, 144)
                 )
+                if interaction.user and interaction.user.display_avatar:
+                    embed.set_thumbnail(url=interaction.user.display_avatar.url)
+
                 if res.audio_bytes:
                     await self.audio_deliverer.deliver(interaction, res.audio_bytes, "eliminated.wav", embed=embed)
                 else:

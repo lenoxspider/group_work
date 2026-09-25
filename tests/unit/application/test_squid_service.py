@@ -1,5 +1,4 @@
-"""Unit tests for SquidService application orchestration."""
-
+import time
 import unittest
 from unittest.mock import AsyncMock
 from src.domain.entities.squid_player import SquidPlayer
@@ -41,6 +40,21 @@ class TestSquidService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.audio_bytes, b"MOCK_GUARD_WAV")
         self.mock_synth.synthesize.assert_called_once()
 
+    async def test_red_light_latency_grace(self):
+        player = SquidPlayer(guild_id="111", user_id="222", player_number="456")
+        self.mock_repo.get_player.return_value = player
+
+        self.service.start_red_light_game("111", target=100)
+        self.service.set_light("111", "RED")
+
+        dto = RedLightMoveDTO(guild_id="111", user_id="222")
+        result = await self.service.process_move(dto)
+
+        # Immediate move within 0.5s survives under latency grace
+        self.assertTrue(result.survived)
+        self.assertIn("grace", result.status_message.lower())
+        self.mock_repo.record_anomaly.assert_called_once()
+
     async def test_red_light_move_elimination(self):
         player = SquidPlayer(guild_id="111", user_id="222", player_number="456")
         season = SquidSeason(guild_id="111")
@@ -49,6 +63,8 @@ class TestSquidService(unittest.IsolatedAsyncioTestCase):
 
         self.service.start_red_light_game("111", target=100)
         self.service.set_light("111", "RED")
+        # Simulate move arriving 1.0s after red light (exceeding 0.5s grace)
+        self.service._active_games["111"]["red_light_time"] = time.monotonic() - 1.0
 
         dto = RedLightMoveDTO(guild_id="111", user_id="222")
         result = await self.service.process_move(dto)
@@ -56,6 +72,7 @@ class TestSquidService(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.survived)
         self.assertIn("eliminated", result.status_message.lower())
         self.assertEqual(result.audio_bytes, b"MOCK_GUARD_WAV")
+        self.mock_repo.record_anomaly.assert_called_once()
 
     async def test_green_light_move_advancement(self):
         player = SquidPlayer(guild_id="111", user_id="222", player_number="001")
@@ -69,6 +86,19 @@ class TestSquidService(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result.survived)
         self.assertGreater(result.distance, 0)
+
+    async def test_preload_audio_cache(self):
+        await self.service.preload_audio_cache()
+        cached_red = self.service.get_cached_audio("red")
+        cached_green = self.service.get_cached_audio("green_korean")
+        self.assertEqual(cached_red, b"MOCK_GUARD_WAV")
+        self.assertEqual(cached_green, b"MOCK_GUARD_WAV")
+
+    def test_dynamic_distance_narrowing(self):
+        dist_r1 = [self.service._calculate_advance(1) for _ in range(20)]
+        dist_r5 = [self.service._calculate_advance(5) for _ in range(20)]
+        # Round 1 has higher max than Round 5
+        self.assertGreater(max(dist_r1), min(dist_r5))
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,6 +11,7 @@ What it does NOT do:
 from typing import Protocol, Optional, List
 from src.domain.entities.squid_player import SquidPlayer
 from src.domain.entities.squid_season import SquidSeason
+from src.domain.entities.movement_anomaly import MovementAnomaly
 
 class SquidRepository(Protocol):
     """Abstract persistence interface for Squid Game data."""
@@ -41,4 +42,16 @@ class SquidRepository(Protocol):
 
     async def get_season(self, guild_id: str) -> Optional[SquidSeason]:
         """Retrieves active season state for a guild."""
+        ...
+
+    async def record_anomaly(self, anomaly: MovementAnomaly) -> None:
+        """Records a movement violation or suspicious event."""
+        ...
+
+    async def atomic_eliminate_and_reward(
+        self,
+        player: SquidPlayer,
+        season: SquidSeason
+    ) -> None:
+        """Atomically persists player elimination and increments season prize pool in a transaction."""
         ...

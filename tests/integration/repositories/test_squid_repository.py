@@ -76,5 +76,37 @@ class TestSquidSqliteRepository(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fetched.pot_amount, 200_000_000)
         self.assertEqual(fetched.formatted_pot, "₩ 200,000,000")
 
+    async def test_record_anomaly(self):
+        from src.domain.entities.movement_anomaly import MovementAnomaly
+        from datetime import timezone
+        anomaly = MovementAnomaly(
+            guild_id="guild_1",
+            user_id="user_1",
+            occurred_at=datetime.now(timezone.utc),
+            reason="Moved during Red Light (1.2s)"
+        )
+        await self.repo.record_anomaly(anomaly)
+
+    async def test_atomic_eliminate_and_reward(self):
+        player = SquidPlayer(
+            guild_id="guild_1",
+            user_id="user_victim",
+            player_number="001",
+            is_alive=True
+        )
+        season = SquidSeason(guild_id="guild_1", pot_amount=0)
+        await self.repo.save_player(player)
+        await self.repo.save_season(season)
+
+        player.eliminate("Moved during Red Light")
+        season.record_elimination_bounty()
+        await self.repo.atomic_eliminate_and_reward(player, season)
+
+        updated_player = await self.repo.get_player("guild_1", "user_victim")
+        updated_season = await self.repo.get_season("guild_1")
+
+        self.assertFalse(updated_player.is_alive)
+        self.assertEqual(updated_season.pot_amount, 100_000_000)
+
 if __name__ == "__main__":
     unittest.main()

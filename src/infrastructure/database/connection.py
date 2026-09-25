@@ -158,6 +158,16 @@ class DatabaseManager:
                 )
             """)
 
+            # 10. Movement anomalies table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS movement_anomalies (
+                    guild_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    reason TEXT NOT NULL
+                )
+            """)
+
             # Migrations for existing databases
             migrations = [
                 ("tasks", "reminded_6h", "INTEGER DEFAULT 0"),

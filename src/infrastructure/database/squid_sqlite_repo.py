@@ -15,6 +15,7 @@ import aiosqlite
 
 from src.domain.entities.squid_player import SquidPlayer
 from src.domain.entities.squid_season import SquidSeason
+from src.domain.entities.movement_anomaly import MovementAnomaly
 from src.domain.interfaces.squid_repository import SquidRepository
 
 class SquidSqliteRepository(SquidRepository):
@@ -126,6 +127,60 @@ class SquidSqliteRepository(SquidRepository):
                     is_active=bool(row[2]),
                     current_game=row[3]
                 )
+
+    async def record_anomaly(self, anomaly: MovementAnomaly) -> None:
+        """Logs a movement violation or close-call event."""
+        query = """
+            INSERT INTO movement_anomalies (guild_id, user_id, occurred_at, reason)
+            VALUES (?, ?, ?, ?)
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                query,
+                (anomaly.guild_id, anomaly.user_id, anomaly.occurred_at.isoformat(), anomaly.reason)
+            )
+            await db.commit()
+
+    async def atomic_eliminate_and_reward(
+        self,
+        player: SquidPlayer,
+        season: SquidSeason
+    ) -> None:
+        """Atomically persists player elimination and increments season prize pool in an isolated transaction."""
+        elim_str = player.eliminated_at.isoformat() if player.eliminated_at else None
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("BEGIN IMMEDIATE")
+            try:
+                await db.execute(
+                    """
+                    UPDATE squid_players
+                    SET is_alive = ?, survival_streak = ?, elimination_reason = ?, eliminated_at = ?
+                    WHERE guild_id = ? AND user_id = ?
+                    """,
+                    (
+                        1 if player.is_alive else 0,
+                        player.survival_streak,
+                        player.elimination_reason,
+                        elim_str,
+                        player.guild_id,
+                        player.user_id
+                    )
+                )
+                await db.execute(
+                    """
+                    INSERT INTO squid_seasons (guild_id, pot_amount, is_active, current_game)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(guild_id) DO UPDATE SET
+                        pot_amount = excluded.pot_amount,
+                        is_active = excluded.is_active,
+                        current_game = excluded.current_game
+                    """,
+                    (season.guild_id, season.pot_amount, 1 if season.is_active else 0, season.current_game)
+                )
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
 
     def _row_to_player(self, row: tuple) -> SquidPlayer:
         elim_at = datetime.fromisoformat(row[6]) if row[6] else None

@@ -122,10 +122,29 @@ class GroupAccountabilityBot(commands.Bot):
             await self.add_cog(MoveCommandCog(self, self.squid_service, self.audio_deliverer))
         logger.info("All Cogs mounted successfully.")
 
+        # Re-sync and cleanup game session state on startup
+        self.squid_service.reset_all_games()
+        if self.speech_synthesizer:
+            try:
+                await self.squid_service.preload_audio_cache()
+                logger.info("Squid Game voice audio cache preloaded successfully.")
+            except Exception as e:
+                logger.warning("Could not pre-synthesize Squid Game audio cache: %s", e)
+
         # Register Global Tree Error Handler
         @self.tree.error
         async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
             orig_error = getattr(error, "original", error)
+            if isinstance(error, app_commands.CommandOnCooldown):
+                msg = f"⏳ **Slow down!** Cooldown active ({error.retry_after:.1f}s remaining)."
+                try:
+                    if interaction.response.is_done():
+                        await interaction.followup.send(msg, ephemeral=True)
+                    else:
+                        await interaction.response.send_message(msg, ephemeral=True)
+                except Exception:
+                    pass
+                return
             if isinstance(orig_error, discord.NotFound):
                 logger.warning("Discord interaction %s expired before response could be sent.", interaction.id)
                 return
