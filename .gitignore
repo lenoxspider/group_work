@@ -1,21 +1,28 @@
 # Environment secrets
 .env
 
-# SQLite databases
+# SQLite Database
 *.sqlite
 *.sqlite3
 *.db
 
-# Uploaded deliverable files
+# Uploaded Files
 uploads/*
 !uploads/.gitkeep
 
-# Python cache & artifacts
+# Python Bytecode & Cache
 __pycache__/
 *.py[cod]
 *$py.class
 *.log
 
-# IDE & Editor artifacts
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor / OS
 .vscode/
 .idea/
+.DS_Store
+Thumbs.db

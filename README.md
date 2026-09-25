@@ -1,156 +1,101 @@
 # 🤖 Group Accountability Discord Bot
 
-An automated Discord bot engineered to manage group assignments with task tracking, deadline countdowns, automated DM reminders, and contribution reporting to eliminate free-riding and miscommunication in student teams.
+A clean-architecture Discord bot engineered to eliminate free-riding and miscommunication in student teams through automated task tracking, deadline countdowns, multi-tier T-minus alerts, objective contribution reporting, and verified deliverable archiving.
 
 ---
 
-## 🌟 Key Features
+## 🏗️ Architecture & Clean Design
+
+This project strictly adheres to Domain-Driven Design (DDD) and Clean Architecture principles:
+- **`src/domain/`**: Pure domain aggregates (`Task`, `Deadline`, `MemberActivity`), domain exceptions (`errors.py`), and abstract repository interfaces. Zero dependencies on Discord or databases.
+- **`src/application/`**: Use cases and orchestration services (`TaskService`, `DeadlineService`, `ActivityService`, `VaultService`) and typed Data Transfer Objects (DTOs).
+- **`src/infrastructure/`**: Asynchronous SQLite repositories (`aiosqlite`), database connection and schema lifecycle, and local file storage vault.
+- **`src/interface/`**: Discord Bot client, presentation formatters (`discord_formatters.py`), and Cogs (`tasks_cog.py`, `deadlines_cog.py`, `reports_cog.py`, `tracker_cog.py`, `admin_cog.py`). Command handlers do exactly three things: parse input → call application service → serialize Discord response.
+- **`src/config/`**: Strongly typed, validated `Settings` loaded once from environment variables.
+
+---
+
+## 🌟 Features
 
 ### 1. 📋 Task Ledger
-- **Command:** `/task add <description> <@member> <due:YYYY-MM-DD [HH:MM]>`
-- **Ledger Posting:** Automatically formats and posts an interactive task card into the `#tasks` channel.
-- **Automated DM Reminders:** Assignees receive background DM reminders at **T-24 hours** and **T-1 hour**.
-- **Task Completion:** `/task complete <TASK-ID>` updates the `#tasks` ledger card to finished status and credits the member's contribution score.
-- **Task Listing:** `/task list [@member]` displays active responsibilities for the whole team or a filtered member.
+- **Command**: `/task add description:<str> member:<@member> due:<YYYY-MM-DD [HH:MM]>`
+- Formats and posts an interactive task card into the `#tasks` channel.
+- Automatically schedules background DM reminders to the assignee at **T-24h** and **T-1h**.
+- **Complete Task**: `/task complete task_id:<TASK-ID>` updates the `#tasks` embed card to completed and increments the member's completed task count.
+- **List Tasks**: `/task list [member:<@member>]` lists open tasks across the project or for a specific teammate.
 
-### 2. 🎯 Deadline Countdown & Alerts
-- **Command:** `/deadline add <"milestone name"> <due:YYYY-MM-DD HH:MM>`
-- **Live Countdown Pin:** Generates and pins a real-time countdown card in `#deadlines` with Discord dynamic timestamps (`<t:TIMESTAMP:R>`).
-- **Hourly Auto-Updates:** A background loop updates the countdown card continuously.
-- **Milestone Alert Pings:** Sends `@everyone` alerts at **T-72 hours**, **T-24 hours**, and **T-6 hours**.
-- **List & Complete:** `/deadline list` and `/deadline complete <DL-ID>`.
+### 2. 🎯 Deadline Countdowns & Milestone Alerts
+- **Command**: `/deadline add name:<str> due:<YYYY-MM-DD HH:MM>`
+- Generates a live countdown message with dynamic Discord markdown (`<t:TIMESTAMP:R>`) and pins it in `#deadlines`.
+- Automatically broadcasts team `@everyone` alert pings at **T-72h**, **T-24h**, and **T-6h**.
+- **Complete Deadline**: `/deadline complete deadline_id:<DL-ID>` marks milestone as finished and unpins it.
+- **List Deadlines**: `/deadline list` views upcoming project milestones.
 
 ### 3. 📊 Anti-Free-Riding Contribution Reports
-- **Command:** `/report [@member]`
-- **Team Standings:** Running `/report` generates a team-wide activity leaderboard ranking completed tasks, message volume, and deliverables submitted.
-- **Member Scorecard:** Running `/report @member` displays a detailed personal breakdown:
-  - Tasks Completed vs. Pending (with visual completion bar)
+- **Command**: `/report [member:<@member>]`
+- **Team Standings**: `/report` displays a team-wide leaderboard ranking members by composite contribution score (completed tasks, file submissions, message frequency).
+- **Member Scorecard**: `/report member:@Alice` generates a detailed personal scorecard with:
+  - Task completion rate with visual progress bar (`🟩🟩⬜⬜`)
   - Messages sent in project channels
-  - Deliverables and files submitted
+  - File deliverables submitted
   - Last activity timestamp
 
 ### 4. 📥 File Deliverable Vault (DM Submission)
-- **Direct DM Submission:** Members DM project files (drafts, reports, code, slides) directly to the bot.
-- **Cryptographic Hash Verification:** The bot computes a SHA-256 hash of the upload, renames the file as `draft_v1_YYYYMMDD_<hash>.ext`, and archives it in `./uploads/`.
-- **Receipt & Transparency:** Sends a DM receipt with the hash to the sender and logs an announcement in `#submissions`.
-- **Activity Credit:** Increments the user's `files_submitted` counter in the contribution report.
+- Students DM files (PDF, docx, code, zip) directly to the bot.
+- The bot computes a SHA-256 hash, renames the file (`draft_v1_YYYYMMDD_<hash[:8]>.ext`), saves it into `./uploads/`, sends a verified receipt in DM, and announces the submission in `#submissions`.
+- Credits the member's `files_submitted` counter in the contribution report.
 
-### 5. 🛠️ Auto-Channel Setup
-- Automatically creates or verifies `#tasks`, `#deadlines`, and `#submissions` when added to a server.
-- Server admins can re-trigger channel setup anytime with `/setup`.
-- Full command cheat-sheet available with `/guide`.
-
----
-
-## 🗄️ SQLite Database Schema
-
-The bot uses an asynchronous SQLite database (`bot_database.sqlite`) managed via `aiosqlite`:
-
-```sql
-CREATE TABLE tasks (
-    task_id TEXT PRIMARY KEY,
-    guild_id TEXT,
-    channel_id TEXT,
-    message_id TEXT,
-    description TEXT NOT NULL,
-    assigned_to TEXT NOT NULL,
-    due_date TEXT NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    completed_at TEXT NULL,
-    reminded_24h INTEGER DEFAULT 0,
-    reminded_1h INTEGER DEFAULT 0
-);
-
-CREATE TABLE deadlines (
-    deadline_id TEXT PRIMARY KEY,
-    guild_id TEXT,
-    channel_id TEXT,
-    message_id TEXT,
-    name TEXT NOT NULL,
-    due_datetime TEXT NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    is_completed INTEGER DEFAULT 0,
-    reminded_72h INTEGER DEFAULT 0,
-    reminded_24h INTEGER DEFAULT 0,
-    reminded_6h INTEGER DEFAULT 0
-);
-
-CREATE TABLE member_activity (
-    guild_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    message_count INTEGER DEFAULT 0,
-    files_submitted INTEGER DEFAULT 0,
-    tasks_completed INTEGER DEFAULT 0,
-    last_active TEXT DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (guild_id, user_id)
-);
-
-CREATE TABLE submissions (
-    submission_id TEXT PRIMARY KEY,
-    guild_id TEXT,
-    user_id TEXT NOT NULL,
-    original_filename TEXT NOT NULL,
-    stored_filename TEXT NOT NULL,
-    file_hash TEXT NOT NULL,
-    file_size INTEGER DEFAULT 0,
-    submitted_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-```
+### 5. 🛠️ Server Setup & Auto-Provisioning
+- Automatically provisions `#tasks`, `#deadlines`, and `#submissions` when joining a server.
+- Administrators can manually verify or re-create channels anytime with `/setup`.
+- Full command cheat sheet available via `/guide`.
 
 ---
 
-## 🚀 Quickstart Guide
+## 🚀 Getting Started
 
 ### 1. Prerequisites
 - Python 3.10+ (Tested on Python 3.14)
-- Dependencies installed from `requirements.txt`:
+- Install dependencies:
   ```bash
   python -m pip install -r requirements.txt
   ```
 
 ### 2. Discord Developer Portal Setup
-1. Visit the [Discord Developer Portal](https://discord.com/developers/applications).
-2. Click **New Application** and give your bot a name (e.g. `Accountability Bot`).
-3. Under the **Bot** tab:
+1. Create an application at the [Discord Developer Portal](https://discord.com/developers/applications).
+2. Under the **Bot** tab:
    - Click **Reset Token** and copy your bot token.
    - Under **Privileged Gateway Intents**, enable:
-     - ✅ **Message Content Intent** (Required for message count tracking)
-     - ✅ **Server Members Intent** (Required for member resolution)
-     - ✅ **Presence Intent**
-4. Under **OAuth2 -> URL Generator**:
+     - ✅ **Message Content Intent**
+     - ✅ **Server Members Intent**
+3. Under **OAuth2 -> URL Generator**:
    - Scopes: `bot`, `applications.commands`
-   - Bot Permissions:
-     - `Manage Channels` (for auto-creating `#tasks`, `#deadlines`, `#submissions`)
-     - `Send Messages`, `Embed Links`, `Attach Files`, `Read Message History`
-     - `Manage Messages` (for pinning countdown messages)
-   - Copy the generated URL and invite the bot to your student project server.
+   - Permissions: `Manage Channels`, `Send Messages`, `Manage Messages`, `Embed Links`, `Attach Files`, `Read Message History`
+   - Invite the bot to your group server.
 
 ### 3. Environment Configuration
 Copy `.env.example` to `.env`:
 ```bash
 cp .env.example .env
 ```
-Edit `.env` with your values:
+Configure your `.env`:
 ```env
-DISCORD_BOT_TOKEN=your_token_from_step_2
-
-# Optional: Add your server's Guild ID for instant slash command sync during dev
-# Right-click your server in Discord -> Copy Server ID (Developer Mode on)
-GUILD_ID=123456789012345678
-
+DISCORD_BOT_TOKEN=your_bot_token_here
+GUILD_ID=your_optional_server_id_for_instant_command_sync
 TASKS_CHANNEL_NAME=tasks
 DEADLINES_CHANNEL_NAME=deadlines
 SUBMISSIONS_CHANNEL_NAME=submissions
 DATABASE_PATH=bot_database.sqlite
+DEFAULT_TIMEZONE=UTC
 ```
 
-### 4. Run the Bot
+### 4. Running the Bot
 ```bash
-python -m bot.main
+python scripts/run.py
 ```
 
-### 5. Running the Test Suite
-Run the test suite to verify database operations, reminders logic, and helpers:
+### 5. Running Tests
+Run the comprehensive test suite (unit and integration tests):
 ```bash
-python -m unittest tests/test_database_and_helpers.py
+python -m unittest discover -s tests -p "test_*.py"
 ```
