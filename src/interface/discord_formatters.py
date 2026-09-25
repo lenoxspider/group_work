@@ -305,3 +305,26 @@ def build_extension_vote_embed(dto: ExtensionResultDTO, task_desc: str) -> disco
     embed.set_footer(text=footer)
     return embed
 
+def build_voice_embed(transcript: str, tone: str, language: str, author_name: Optional[str] = None) -> discord.Embed:
+    """Builds a formatted audio announcement card embed."""
+    embed = discord.Embed(
+        title="🎙️ Voice Announcement",
+        description=f"🔊 *\"{transcript}\"*",
+        color=COLOR_PRIMARY,
+        timestamp=datetime.now(timezone.utc)
+    )
+    tone_badge = {
+        "drill_sergeant": "🪖 Drill Sergeant",
+        "deadpan": "😐 Deadpan",
+        "friendly": "😊 Friendly",
+        "serious": "💼 Serious"
+    }.get(tone, f"🎭 {tone.capitalize()}")
+
+    embed.add_field(name="🎭 Tone", value=f"`{tone_badge}`", inline=True)
+    embed.add_field(name="🌐 Language", value=f"`{language.upper()}`", inline=True)
+    if author_name:
+        embed.set_footer(text=f"Requested by {author_name} • eSpeak-NG Audio")
+    else:
+        embed.set_footer(text="Automated voice dispatch • eSpeak-NG Audio")
+    return embed
+

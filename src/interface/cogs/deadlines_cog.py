@@ -10,6 +10,7 @@ What it does NOT do:
 - Does NOT execute milestone business logic or database queries.
 """
 
+import io
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -18,7 +19,9 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from src.application.dtos.deadline_dtos import CreateDeadlineDTO
+from src.application.dtos.voice_dtos import SynthesizeRequestDTO
 from src.application.services.deadline_service import DeadlineService
+from src.application.services.voice_service import VoiceService
 from src.domain.errors import AppError
 from src.interface.discord_formatters import (
     build_deadline_embed,
@@ -33,9 +36,15 @@ logger = logging.getLogger("interface.cogs.deadlines")
 class DeadlinesCog(commands.Cog, name="Milestones"):
     """Interface adapter for Deadline countdown commands and alert loops."""
 
-    def __init__(self, bot: commands.Bot, deadline_service: DeadlineService):
+    def __init__(
+        self,
+        bot: commands.Bot,
+        deadline_service: DeadlineService,
+        voice_service: Optional[VoiceService] = None
+    ):
         self.bot = bot
         self.service = deadline_service
+        self.voice_service = voice_service
         self.countdown_loop.start()
 
     def cog_unload(self):
@@ -187,7 +196,17 @@ class DeadlinesCog(commands.Cog, name="Milestones"):
                     color=color,
                     timestamp=now
                 )
-                await ch.send(content="@everyone", embed=embed)
+                voice_file = None
+                if self.voice_service:
+                    try:
+                        tone = "drill_sergeant" if act.alert_tier == "6h" else "serious"
+                        script = self.voice_service.generate_deadline_alert_script(act.name, act.alert_tier)
+                        clip = await self.voice_service.synthesize(SynthesizeRequestDTO(text=script, tone=tone))
+                        voice_file = discord.File(io.BytesIO(clip.audio_bytes), filename="milestone_alert.wav")
+                    except Exception as ve:
+                        logger.warning("Could not synthesize voice for milestone alert: %s", ve)
+
+                await ch.send(content="@everyone", embed=embed, file=voice_file)
                 await self.service.acknowledge_alert(act.deadline_id, act.alert_tier)
         except Exception as e:
             logger.error("Error in countdown alert loop: %s", e, exc_info=True)

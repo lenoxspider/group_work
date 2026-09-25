@@ -10,6 +10,7 @@ What it does NOT do:
 - Does NOT contain task business logic or database queries directly.
 """
 
+import io
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -19,9 +20,11 @@ from discord.ext import commands, tasks
 
 from src.application.dtos.task_dtos import CreateTaskDTO
 from src.application.dtos.extension_dtos import CreateExtensionDTO
+from src.application.dtos.voice_dtos import SynthesizeRequestDTO
 from src.application.services.task_service import TaskService
 from src.application.services.extension_service import ExtensionService
 from src.application.services.preference_service import PreferenceService
+from src.application.services.voice_service import VoiceService
 from src.domain.errors import AppError
 from src.interface.cogs.task_buttons import TaskActionView
 from src.interface.cogs.extension_buttons import ExtensionVoteView
@@ -45,18 +48,30 @@ class TasksCog(commands.Cog, name="Task Ledger"):
         bot: commands.Bot,
         task_service: TaskService,
         extension_service: ExtensionService,
-        preference_service: Optional[PreferenceService] = None
+        preference_service: Optional[PreferenceService] = None,
+        voice_service: Optional[VoiceService] = None
     ):
         self.bot = bot
         self.service = task_service
         self.extension_service = extension_service
         self.preference_service = preference_service
+        self.voice_service = voice_service
         self.bot.add_view(TaskActionView(task_service))
         self.bot.add_view(ExtensionVoteView(extension_service))
         self.reminder_loop.start()
 
     def cog_unload(self):
         self.reminder_loop.cancel()
+
+    async def _try_generate_voice_file(self, script: str, user_id: str, tone: str = "drill_sergeant") -> Optional[discord.File]:
+        if not self.voice_service or not script:
+            return None
+        try:
+            clip = await self.voice_service.synthesize(SynthesizeRequestDTO(text=script, user_id=user_id, tone=tone))
+            return discord.File(io.BytesIO(clip.audio_bytes), filename="voice_alert.wav")
+        except Exception as e:
+            logger.warning("Could not synthesize voice alert: %s", e)
+            return None
 
     task_group = app_commands.Group(name="task", description="Group task management")
 
@@ -297,8 +312,12 @@ class TasksCog(commands.Cog, name="Task Ledger"):
                 shame_ch = discord.utils.get(guild.text_channels, name="wall-of-shame")
                 if shame_ch:
                     embed = build_wall_of_shame_embed(act)
+                    v_script = self.voice_service.generate_task_reminder_script(
+                        act.task_id, act.description, f"<@{act.user_id}>", hours_overdue=act.hours_overdue
+                    ) if self.voice_service else ""
+                    v_file = await self._try_generate_voice_file(v_script, act.user_id) if v_script else None
                     try:
-                        await shame_ch.send(content=f"🚨 **WALL OF SHAME ALERT:** <@{act.user_id}>", embed=embed)
+                        await shame_ch.send(content=f"🚨 **WALL OF SHAME ALERT:** <@{act.user_id}>", embed=embed, file=v_file)
                     except Exception as e:
                         logger.warning("Could not post to #wall-of-shame in guild %s: %s", guild.id, e)
                 await self.service.acknowledge_shame(act.task_id)
@@ -358,8 +377,15 @@ class TasksCog(commands.Cog, name="Task Ledger"):
                     timestamp=now
                 )
                 embed.set_footer(text=f"Complete: /task complete {act.task_id} • Request extension: /task extend")
+                v_file = None
+                if self.voice_service and act.reminder_tier == "1h":
+                    v_script = self.voice_service.generate_task_reminder_script(
+                        act.task_id, act.description, user.display_name, is_urgent=True
+                    )
+                    v_file = await self._try_generate_voice_file(v_script, act.user_id)
+
                 try:
-                    await user.send(embed=embed)
+                    await user.send(embed=embed, file=v_file)
                     await self.service.acknowledge_reminder(act.task_id, act.reminder_tier)
                 except Exception as e:
                     logger.warning("Could not DM reminder to user %s: %s", act.user_id, e)

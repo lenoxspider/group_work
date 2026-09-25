@@ -55,8 +55,26 @@ This project strictly adheres to Domain-Driven Design (DDD) and Clean Architectu
 ### 4. 🚨 Wall of Shame & On-Time Streaks
 - **Channel**: `#wall-of-shame` (auto-provisioned with read-only display protection).
 - **Automated Overdue Detection**: Background loop scans every 2 minutes for delinquent tasks past their due date.
-- **Punishment & Shaming**: Automatically posts a public red shaming card pinging the delinquent member with elapsed overdue hours.
+- **Punishment & Shaming**: Automatically posts a public red shaming card pinging the delinquent member with elapsed overdue hours and spoken audio warning.
 - **Streak Break**: Consecutive on-time streak is immediately reset to `0` (`🔥 0`) upon hitting the Wall of Shame or late delivery.
+
+### 5. 🎙️ Voice Synthesis & Spoken Alerts (eSpeak-NG)
+- **Base Command**: `/say text:<str> [tone:serious|drill_sergeant|deadpan|friendly] [lang:en-us|ru]`
+  - Synthesizes arbitrary text into a `.wav` file uploaded directly to Discord with an interactive announcement card embed.
+- **Voice Task Reminders**:
+  - T-1h urgent reminder DMs and Wall of Shame overdue posts include an attached spoken audio clip alerting the member.
+- **Voice Deadline Alerts**:
+  - Milestone countdown alerts at T-24h, T-6h, and T-0 include escalating spoken audio broadcasts attached directly to the alert.
+- **Voice Leaderboard Briefing**:
+  - `/report voice:True`: Synthesizes an executive audio summary of the team standings, naming the top contributor and highlighting tasks needing attention.
+- **Per-User Vocal Signatures**:
+  - Each teammate is pinned to a deterministic voice pitch and speed offset derived from their Discord ID, allowing members to recognize by ear who is being addressed.
+- **Tone & Language Presets**:
+  - `serious` (clear, neutral, assertive)
+  - `drill_sergeant` (fast, deep, commanding)
+  - `deadpan` (flat, slow, monotonous)
+  - `friendly` (upbeat, cheerful)
+  - Language toggle: English (`en-us`) and Russian (`ru`).
 
 ### 3. 🎯 Deadline Countdowns & Milestone Alerts
 - **Command**: `/deadline add name:<str> due:<YYYY-MM-DD HH:MM>`

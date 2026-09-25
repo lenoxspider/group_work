@@ -70,11 +70,12 @@ discord_group_work/
 │   │       ├── deadline_service.py  # Milestone use cases (schedule, evaluate alerts, complete)
 │   │       ├── activity_service.py  # Metrics use cases (record message, generate reports)
 │   │       ├── preference_service.py# Preference use cases (set timezone, quiet hours, DND evaluation)
+│   │       ├── voice_service.py     # Voice use cases (speech synthesis, alert scripts, report briefings)
 │   │       ├── vault_service.py     # Vault use cases (verify SHA-256, store, record submission)
 │   │       ├── project_service.py   # Lifecycle use cases (status dashboard, finish/archive)
 │   │       └── extension_service.py # Extension use cases (request, cast vote, majority conclude)
 │   │
-│   ├── infrastructure/              # ADAPTERS: SQLite DB, File Vault
+│   ├── infrastructure/              # ADAPTERS: SQLite DB, File Vault, eSpeak-NG
 │   │   ├── __init__.py
 │   │   ├── database/
 │   │   │   ├── __init__.py
@@ -85,9 +86,14 @@ discord_group_work/
 │   │   │   ├── preference_sqlite_repo.py# SQLite implementation of PreferenceRepository
 │   │   │   ├── project_sqlite_repo.py # SQLite implementation of ProjectRepository
 │   │   │   └── extension_sqlite_repo.py# SQLite implementation of ExtensionRepository
-│   │   └── storage/
+│   │   ├── storage/
+│   │   │   ├── __init__.py
+│   │   │   └── local_file_vault.py  # Local filesystem implementation of VaultStorage
+│   │   └── speech/
 │   │       ├── __init__.py
-│   │       └── local_file_vault.py  # Local filesystem implementation of VaultStorage
+│   │       ├── espeak_synthesizer.py# Subprocess adapter executing espeak-ng binary
+│   │       ├── mock_synthesizer.py  # Standard library in-memory WAV generator for test isolation
+│   │       └── attachment_deliverer.py# Discord audio file attachment delivery adapter
 │   │
 │   └── interface/                   # ENTRY POINTS: Discord Cogs, Embeds, Client
 │       ├── __init__.py
@@ -97,10 +103,11 @@ discord_group_work/
 │           ├── __init__.py
 │           ├── task_buttons.py      # Persistent TaskActionView (Nudge, In-Progress, Complete, Verify, Extend)
 │           ├── extension_buttons.py # Persistent ExtensionVoteView (Approve, Reject, Conclude)
-│           ├── tasks_cog.py         # /task commands, buddy verification, escalation & Wall of Shame loop
+│           ├── tasks_cog.py         # /task commands, buddy verification, escalation, voice nudges & Wall of Shame loop
 │           ├── preference_cog.py    # /timezone commands (set, quiet, view)
-│           ├── deadlines_cog.py     # /deadline add, /deadline list & 15m countdown update loop
-│           ├── reports_cog.py       # /report (team leaderboard, military ranks & on-time streaks)
+│           ├── voice_cog.py         # /say command (arbitrary speech with tone/language flags)
+│           ├── deadlines_cog.py     # /deadline add, /deadline list, 15m countdown update loop & voice alerts
+│           ├── reports_cog.py       # /report (team leaderboard, military ranks, on-time streaks & voice briefing)
 │           ├── tracker_cog.py       # on_message counting & in-server /submit deliverable receiver
 │           └── admin_cog.py         # /setup, /guide, read-only protection, and /project commands
 │
@@ -112,22 +119,26 @@ discord_group_work/
 │   │   │   ├── test_deadline_entity.py
 │   │   │   ├── test_activity_entity.py
 │   │   │   ├── test_preference_entity.py
+│   │   │   ├── test_voice_profile.py
 │   │   │   ├── test_project_state_entity.py
 │   │   │   └── test_extension_entity.py
 │   │   └── application/
 │   │       ├── test_task_service.py
 │   │       ├── test_deadline_service.py
 │   │       ├── test_preference_service.py
+│   │       ├── test_voice_service.py
 │   │       ├── test_vault_service.py
 │   │       ├── test_project_service.py
 │   │       └── test_extension_service.py
 │   └── integration/
-│       └── repositories/
-│           ├── test_task_repository.py
-│           ├── test_activity_repository.py
-│           ├── test_preference_repository.py
-│           ├── test_project_repository.py
-│           └── test_extension_repository.py
+│       ├── repositories/
+│       │   ├── test_task_repository.py
+│       │   ├── test_activity_repository.py
+│       │   ├── test_preference_repository.py
+│       │   ├── test_project_repository.py
+│       │   └── test_extension_repository.py
+│       └── speech/
+│           └── test_espeak_synthesizer.py
 │
 ├── uploads/
 │   └── .gitkeep                     # Target directory for versioned, hashed deliverables
