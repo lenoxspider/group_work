@@ -19,6 +19,12 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
+import aiohttp.connector
+import aiohttp.resolver
+
+# Force aiohttp to use system socket resolver on Windows (aiodns fails on many Windows networks)
+aiohttp.connector.DefaultResolver = aiohttp.resolver.ThreadedResolver
+
 from src.config.settings import Settings
 from src.interface.bot import GroupAccountabilityBot
 
