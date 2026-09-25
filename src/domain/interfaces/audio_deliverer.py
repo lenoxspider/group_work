@@ -19,7 +19,8 @@ class AudioDeliverer(Protocol):
         target: Any,
         audio_bytes: bytes,
         filename: str = "announcement.wav",
-        content: Optional[str] = None
+        content: Optional[str] = None,
+        embed: Optional[Any] = None
     ) -> Any:
         """
         Delivers synthesized audio to the specified target.
@@ -29,5 +30,6 @@ class AudioDeliverer(Protocol):
             audio_bytes: Raw audio byte payload.
             filename: Name for the attachment.
             content: Optional message text caption.
+            embed: Optional rich presentation embed.
         """
         ...
