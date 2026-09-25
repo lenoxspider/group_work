@@ -143,8 +143,8 @@ class SquidCog(commands.GroupCog, group_name="squid"):
             await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
 
     @app_commands.command(name="redlight", description="Run or stop the automated Red Light Green Light game loop")
-    @app_commands.describe(action="start (automated loop) or stop")
-    async def redlight(self, interaction: discord.Interaction, action: Literal["start", "stop"]):
+    @app_commands.describe(action="start (automated loop), stop, or manual phase trigger")
+    async def redlight(self, interaction: discord.Interaction, action: Literal["start", "stop", "green", "red"]):
         try:
             await interaction.response.defer()
         except discord.NotFound:
@@ -157,6 +157,16 @@ class SquidCog(commands.GroupCog, group_name="squid"):
                 running.cancel()
             self.squid_service.end_red_light_game(guild_id)
             await interaction.followup.send("🛑 **Red Light Green Light game terminated by the Front Man.**")
+            return
+
+        if action == "green":
+            self.squid_service.set_light(guild_id, "GREEN")
+            await interaction.followup.send("🟢 **Light manually set to GREEN.**")
+            return
+
+        if action == "red":
+            self.squid_service.set_light(guild_id, "RED")
+            await interaction.followup.send("🔴 **Light manually set to RED.**")
             return
 
         if guild_id in self._running_tasks and not self._running_tasks[guild_id].done():
