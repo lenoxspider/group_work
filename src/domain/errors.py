@@ -35,3 +35,7 @@ class DeadlineAlreadyCompletedError(AppError):
 class StorageError(AppError):
     """Raised when an error occurs during file or persistence operations."""
     pass
+
+class ExternalServiceError(AppError):
+    """Raised when an external tool, binary, or service fails."""
+    pass
