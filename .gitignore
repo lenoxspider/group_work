@@ -1,0 +1,21 @@
+# Environment secrets
+.env
+
+# SQLite databases
+*.sqlite
+*.sqlite3
+*.db
+
+# Uploaded deliverable files
+uploads/*
+!uploads/.gitkeep
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+
+# IDE & Editor artifacts
+.vscode/
+.idea/
