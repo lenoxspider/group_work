@@ -20,6 +20,8 @@ class NotFoundError(AppError):
     """Raised when a requested domain entity is not found."""
     pass
 
+EntityNotFoundError = NotFoundError
+
 class ValidationError(AppError):
     """Raised when entity data or input fails business validation."""
     pass

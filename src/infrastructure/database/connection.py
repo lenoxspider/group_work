@@ -134,6 +134,30 @@ class DatabaseManager:
                 )
             """)
 
+            # 8. Squid Game players table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS squid_players (
+                    guild_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    player_number TEXT NOT NULL,
+                    is_alive INTEGER DEFAULT 1,
+                    survival_streak INTEGER DEFAULT 0,
+                    elimination_reason TEXT,
+                    eliminated_at TEXT,
+                    PRIMARY KEY (guild_id, user_id)
+                )
+            """)
+
+            # 9. Squid Game seasons table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS squid_seasons (
+                    guild_id TEXT PRIMARY KEY,
+                    pot_amount INTEGER DEFAULT 0,
+                    is_active INTEGER DEFAULT 1,
+                    current_game TEXT DEFAULT 'Red Light Green Light'
+                )
+            """)
+
             # Migrations for existing databases
             migrations = [
                 ("tasks", "reminded_6h", "INTEGER DEFAULT 0"),

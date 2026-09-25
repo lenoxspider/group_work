@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Optional
 from src.domain.errors import ValidationError
 
-VALID_TONES = {"serious", "drill_sergeant", "deadpan", "friendly"}
+VALID_TONES = {"serious", "drill_sergeant", "deadpan", "friendly", "guard", "doll"}
 
 @dataclass
 class VoiceProfile:
@@ -40,7 +40,14 @@ class VoiceProfile:
         clean_tone = tone.lower().strip()
         clean_lang = "ru" if language.lower().strip().startswith("ru") else "en-us"
 
-        if clean_tone == "drill_sergeant":
+        if clean_tone == "guard":
+            # Slow, flat, low-pitch masked guard
+            return cls(voice_name=clean_lang, speed=110, pitch=15, tone="guard", variant=None)
+        elif clean_tone == "doll":
+            # Eerie high-pitch Korean doll (or current language if specified)
+            doll_lang = "ko" if language == "ko" else clean_lang
+            return cls(voice_name=doll_lang, speed=125, pitch=60, tone="doll", variant=None)
+        elif clean_tone == "drill_sergeant":
             # Fast, deep, commanding
             return cls(voice_name=clean_lang, speed=195, pitch=35, tone="drill_sergeant", variant="m3")
         elif clean_tone == "deadpan":
