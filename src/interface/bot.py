@@ -11,6 +11,7 @@ What it does NOT do:
 
 import logging
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from src.config.settings import Settings
@@ -55,7 +56,6 @@ class GroupAccountabilityBot(commands.Bot):
         intents = discord.Intents.default()
         intents.message_content = True
         intents.guilds = True
-        intents.members = True
         intents.messages = True
 
         super().__init__(
@@ -121,6 +121,15 @@ class GroupAccountabilityBot(commands.Bot):
             await self.add_cog(SquidCog(self, self.squid_service, self.audio_deliverer, self.speech_synthesizer))
             await self.add_cog(MoveCommandCog(self, self.squid_service, self.audio_deliverer))
         logger.info("All Cogs mounted successfully.")
+
+        # Register Global Tree Error Handler
+        @self.tree.error
+        async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+            orig_error = getattr(error, "original", error)
+            if isinstance(orig_error, discord.NotFound):
+                logger.warning("Discord interaction %s expired before response could be sent.", interaction.id)
+                return
+            logger.error("Unhandled slash command error: %s", error, exc_info=orig_error)
 
         # Sync Slash Commands
         try:

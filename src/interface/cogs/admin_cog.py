@@ -140,7 +140,11 @@ class AdminCog(commands.Cog, name="Administration"):
     )
     @app_commands.default_permissions(manage_channels=True)
     async def setup_channels(self, interaction: discord.Interaction):
-        await interaction.response.defer()
+        try:
+            await interaction.response.defer()
+        except discord.NotFound:
+            logger.warning("Setup command interaction timed out before deferral.")
+            return
         guild = interaction.guild
         if not guild:
             await interaction.followup.send("❌ Must be run in a server.", ephemeral=True)
@@ -177,7 +181,10 @@ class AdminCog(commands.Cog, name="Administration"):
 
     @project_group.command(name="status", description="View overall project progress, task health, and milestone countdown")
     async def project_status(self, interaction: discord.Interaction):
-        await interaction.response.defer()
+        try:
+            await interaction.response.defer()
+        except discord.NotFound:
+            return
         guild = interaction.guild
         if not guild:
             await interaction.followup.send("❌ Must be run inside a server.", ephemeral=True)
@@ -190,7 +197,10 @@ class AdminCog(commands.Cog, name="Administration"):
     @project_group.command(name="finish", description="Conclude project sprint, lock display channels, and generate final retrospective report")
     @app_commands.default_permissions(manage_channels=True)
     async def project_finish(self, interaction: discord.Interaction):
-        await interaction.response.defer()
+        try:
+            await interaction.response.defer()
+        except discord.NotFound:
+            return
         guild = interaction.guild
         if not guild:
             await interaction.followup.send("❌ Must be run inside a server.", ephemeral=True)
