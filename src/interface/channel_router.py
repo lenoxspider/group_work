@@ -87,6 +87,10 @@ class ChannelRouter:
         )
         await self.binding_repo.save_binding(binding)
 
+    async def resolve(self, guild: discord.Guild, key: str) -> Optional[discord.TextChannel]:
+        """Alias for get() to resolve destination channels."""
+        return await self.get(guild, key)
+
     async def bind_all(self, guild_id: str, bindings: Dict[str, str]) -> None:
         """Persists multiple key -> channel_id mappings."""
         now = datetime.now(timezone.utc)
