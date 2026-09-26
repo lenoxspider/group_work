@@ -111,7 +111,9 @@ discord_group_work/
 │       ├── __init__.py
 │       ├── bot.py                   # GroupAccountabilityBot Discord client subclass
 │       ├── channel_router.py        # Centralized 4-tier channel resolver & emergency fallback logger
+│       ├── red_light_runner.py      # Automated RLGL match execution, early conditional end & arena cleanup
 │       ├── discord_formatters.py    # Discord Embed card formatters (Hot Pink #FF0090 Squid styling)
+│       ├── squid_formatters.py      # Specialized Squid Game enrollment, track status, and elimination embeds
 │       └── cogs/
 │           ├── __init__.py
 │           ├── task_buttons.py      # Persistent TaskActionView (Nudge, In-Progress, Complete, Verify, Extend)
@@ -124,7 +126,8 @@ discord_group_work/
 │           ├── deadlines_cog.py     # /deadline add, /deadline list, 15m countdown update loop & voice alerts
 │           ├── reports_cog.py       # /report (team leaderboard, military ranks, on-time streaks & voice briefing)
 │           ├── tracker_cog.py       # on_message counting & in-server /submit deliverable receiver
-│           └── admin_cog.py         # /setup, /guide, read-only protection, and /project commands
+│           ├── admin_cog.py         # /setup, /guide, read-only protection, and /project commands
+│           └── cleanup_cog.py       # /cleanup (bulk purge) and /clean_arena (arena maintenance)
 │
 ├── tests/
 │   ├── __init__.py

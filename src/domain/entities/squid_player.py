@@ -66,3 +66,9 @@ class SquidPlayer:
         if not self.is_alive:
             raise ValidationError("Cannot increment survival streak for an eliminated player.")
         self.survival_streak += 1
+
+    def revive(self) -> None:
+        """Restores player to alive status for new participation."""
+        self.is_alive = True
+        self.elimination_reason = None
+        self.eliminated_at = None

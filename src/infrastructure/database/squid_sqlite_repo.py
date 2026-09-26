@@ -208,6 +208,13 @@ class SquidSqliteRepository(SquidRepository):
             await db.execute(query, (guild_id,))
             await db.commit()
 
+    async def clear_players(self, guild_id: str) -> None:
+        """Removes all enrolled contestants for a guild to reset session data."""
+        query = "DELETE FROM squid_players WHERE guild_id = ?"
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(query, (guild_id,))
+            await db.commit()
+
     def _row_to_player(self, row: tuple) -> SquidPlayer:
         elim_at = datetime.fromisoformat(row[6]) if row[6] else None
         return SquidPlayer(

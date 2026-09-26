@@ -124,5 +124,21 @@ class TestSquidSqliteRepository(unittest.IsolatedAsyncioTestCase):
         season = await self.repo.get_season("guild_1")
         self.assertEqual(season.pot_amount, 0)
 
+    async def test_clear_players(self):
+        p1 = SquidPlayer(guild_id="guild_1", user_id="u1", player_number="001", is_alive=True)
+        p2 = SquidPlayer(guild_id="guild_1", user_id="u2", player_number="002", is_alive=True)
+        p3 = SquidPlayer(guild_id="guild_2", user_id="u3", player_number="001", is_alive=True)
+        await self.repo.save_player(p1)
+        await self.repo.save_player(p2)
+        await self.repo.save_player(p3)
+
+        await self.repo.clear_players("guild_1")
+        g1_players = await self.repo.list_players("guild_1")
+        self.assertEqual(len(g1_players), 0)
+
+        # Ensure guild_2 is untouched
+        g2_players = await self.repo.list_players("guild_2")
+        self.assertEqual(len(g2_players), 1)
+
 if __name__ == "__main__":
     unittest.main()

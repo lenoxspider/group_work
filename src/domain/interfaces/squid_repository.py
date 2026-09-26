@@ -63,3 +63,7 @@ class SquidRepository(Protocol):
     async def reset_season(self, guild_id: str) -> None:
         """Resets the prize pot and season state back to initial values."""
         ...
+
+    async def clear_players(self, guild_id: str) -> None:
+        """Removes all enrolled contestants for a guild to reset session data."""
+        ...

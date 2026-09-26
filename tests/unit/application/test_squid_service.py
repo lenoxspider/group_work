@@ -26,6 +26,13 @@ class TestSquidService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.display_tag, "Player 001")
         self.mock_repo.save_player.assert_called_once()
 
+    async def test_enroll_player_blocked_when_game_active(self):
+        self.service.start_red_light_game("111")
+        dto = EnrollPlayerDTO(guild_id="111", user_id="222")
+        with self.assertRaises(ValidationError) as ctx:
+            await self.service.enroll_player(dto)
+        self.assertIn("locked", str(ctx.exception).lower())
+
     async def test_eliminate_player(self):
         player = SquidPlayer(guild_id="111", user_id="222", player_number="067")
         season = SquidSeason(guild_id="111", pot_amount=0)
@@ -124,6 +131,35 @@ class TestSquidService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(elims), 1)
         self.assertEqual(elims[0].user_id, "u2")
         self.assertIn("Failed to reach the finish line", elims[0].reason)
+
+    async def test_get_active_racers(self):
+        p1 = SquidPlayer(guild_id="111", user_id="u1", player_number="001", is_alive=True)
+        p2 = SquidPlayer(guild_id="111", user_id="u2", player_number="002", is_alive=True)
+        self.mock_repo.list_players.return_value = [p1, p2]
+
+        self.service.start_red_light_game("111", target=100)
+        # Initially both are active racers
+        racers = await self.service.get_active_racers("111")
+        self.assertEqual(len(racers), 2)
+
+        # u1 crosses finish line
+        self.service._active_games["111"]["finished"].add("u1")
+        racers = await self.service.get_active_racers("111")
+        self.assertEqual(len(racers), 1)
+        self.assertEqual(racers[0].user_id, "u2")
+
+        # u2 crosses finish line
+        self.service._active_games["111"]["finished"].add("u2")
+        racers = await self.service.get_active_racers("111")
+        self.assertEqual(len(racers), 0)
+
+    async def test_clear_session(self):
+        self.service.start_red_light_game("111", target=100)
+        self.assertIn("111", self.service._active_games)
+
+        await self.service.clear_session("111")
+        self.assertNotIn("111", self.service._active_games)
+        self.mock_repo.clear_players.assert_called_once_with("111")
 
 if __name__ == "__main__":
     unittest.main()

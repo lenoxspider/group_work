@@ -50,6 +50,7 @@ from src.interface.cogs.preference_cog import PreferenceCog
 from src.interface.cogs.voice_cog import VoiceCog
 from src.interface.cogs.squid_cog import SquidCog
 from src.interface.cogs.move_command_cog import MoveCommandCog
+from src.interface.cogs.cleanup_cog import CleanupCog
 
 logger = logging.getLogger("interface.bot")
 
@@ -122,6 +123,7 @@ class GroupAccountabilityBot(commands.Bot):
         await self.add_cog(TrackerCog(self, self.activity_service, self.vault_service, self.channel_router))
         await self.add_cog(AdminCog(self, self.project_service, self.channel_router))
         await self.add_cog(PreferenceCog(self, self.preference_service))
+        await self.add_cog(CleanupCog(self, self.channel_router))
         if self.voice_service and self.audio_deliverer:
             await self.add_cog(VoiceCog(self, self.voice_service, self.audio_deliverer))
         if self.audio_deliverer:

@@ -70,8 +70,14 @@ class SquidService:
 
     async def enroll_player(self, dto: EnrollPlayerDTO) -> PlayerResultDTO:
         """Enrolls a Discord member into the Squid Game roster with the next 3-digit tag."""
+        if self.get_active_game(dto.guild_id):
+            raise ValidationError("Arena doors are locked! A match is currently in progress. You cannot join mid-game.")
+
         existing = await self.squid_repo.get_player(dto.guild_id, dto.user_id)
         if existing:
+            if not existing.is_alive:
+                existing.revive()
+                await self.squid_repo.save_player(existing)
             return self._to_player_dto(existing)
 
         number = await self.squid_repo.get_next_available_number(dto.guild_id)
@@ -220,6 +226,20 @@ class SquidService:
         """Resets the season bounty pot and restarts the game cycle."""
         await self.squid_repo.reset_season(guild_id)
         self.end_red_light_game(guild_id)
+
+    async def get_active_racers(self, guild_id: str) -> list[SquidPlayer]:
+        """Returns living contestants who have not yet crossed the finish line."""
+        game = self._active_games.get(guild_id)
+        if not game:
+            return []
+        finished_users = game.get("finished", set())
+        alive_players = await self.squid_repo.list_players(guild_id, alive_only=True)
+        return [p for p in alive_players if p.user_id not in finished_users]
+
+    async def clear_session(self, guild_id: str) -> None:
+        """Clears active session game state and resets contestant roster."""
+        self.end_red_light_game(guild_id)
+        await self.squid_repo.clear_players(guild_id)
 
     def _calculate_advance(self, round_num: int) -> int:
         """Dynamic step distance: narrows each round as tension increases."""

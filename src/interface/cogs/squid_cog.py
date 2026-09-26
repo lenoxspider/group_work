@@ -29,6 +29,7 @@ from src.interface.squid_formatters import (
     build_red_light_embed
 )
 from src.domain.errors import AppError
+from src.interface.red_light_runner import RedLightRunner
 
 logger = logging.getLogger("interface.cogs.squid")
 
@@ -46,6 +47,7 @@ class SquidCog(commands.GroupCog, group_name="squid"):
         self.squid_service = squid_service
         self.audio_deliverer = audio_deliverer
         self.synthesizer = synthesizer
+        self.runner = RedLightRunner(bot, squid_service, audio_deliverer, synthesizer)
         self._running_tasks: dict = {}
         super().__init__()
 
@@ -93,7 +95,15 @@ class SquidCog(commands.GroupCog, group_name="squid"):
         except discord.NotFound:
             return
 
-        dto = EnrollPlayerDTO(guild_id=str(interaction.guild_id), user_id=str(interaction.user.id))
+        guild_id = str(interaction.guild_id)
+        if self.squid_service.get_active_game(guild_id):
+            await interaction.followup.send(
+                "⛔ **The arena doors are locked!** A match is currently in progress. You must wait for the current session to conclude before joining.",
+                ephemeral=True
+            )
+            return
+
+        dto = EnrollPlayerDTO(guild_id=guild_id, user_id=str(interaction.user.id))
         try:
             result = await self.squid_service.enroll_player(dto)
             if interaction.guild and isinstance(interaction.user, discord.Member):
@@ -240,136 +250,20 @@ class SquidCog(commands.GroupCog, group_name="squid"):
             await interaction.followup.send("⚠️ **A game is already in progress in this server!** Use `/squid redlight action:stop` to abort.", ephemeral=True)
             return
 
-        # Auto-revive all contestants for the match and verify roster
-        await self.squid_service.revive_all_players(guild_id)
-        enrolled = await self.squid_service.squid_repo.list_players(guild_id)
-        if not enrolled:
-            await interaction.followup.send("⚠️ **No contestants registered!** Players must use `/squid join` first.", ephemeral=True)
+        # Check enrolled contestants who are alive and ready to play
+        alive_players = await self.squid_service.squid_repo.list_players(guild_id, alive_only=True)
+        if not alive_players:
+            await interaction.followup.send(
+                "⚠️ **Cannot start Squid Game:** At least 1 player must join first! Active contestants must run `/squid join` to participate.",
+                ephemeral=True
+            )
             return
 
-        await interaction.followup.send("🎮 **All contestants revived! Initiating Red Light Green Light session...**")
-        task = self.bot.loop.create_task(self._run_automated_session(interaction.channel, guild_id))
+        await interaction.followup.send(
+            f"🎮 **{len(alive_players)} contestant(s) assembled on the track! Initiating Red Light Green Light session...**"
+        )
+        task = self.bot.loop.create_task(self.runner.run(interaction.channel, guild_id))
         self._running_tasks[guild_id] = task
-
-    async def _run_automated_session(self, channel, guild_id: str):
-        """Runs the automated Red Light Green Light cycle with transient audio and clean embed edits."""
-        active_audio_msg: Optional[discord.Message] = None
-
-        async def _play_transient_audio(audio_bytes: bytes, filename: str):
-            nonlocal active_audio_msg
-            if active_audio_msg:
-                try:
-                    await active_audio_msg.delete()
-                except Exception:
-                    pass
-            try:
-                active_audio_msg = await self.audio_deliverer.deliver(channel, audio_bytes, filename)
-                if active_audio_msg:
-                    async def _auto_cleanup(target_msg: discord.Message):
-                        await asyncio.sleep(5.0)
-                        try:
-                            await target_msg.delete()
-                        except Exception:
-                            pass
-                    self.bot.loop.create_task(_auto_cleanup(active_audio_msg))
-            except Exception:
-                pass
-
-        try:
-            self.squid_service.start_red_light_game(guild_id, target=100)
-            await self.squid_service.preload_audio_cache()
-
-            intro_audio = self.squid_service.get_cached_audio("intro")
-            if not intro_audio and self.synthesizer:
-                script = GuardVoiceLines.game_announcement("Red Light Green Light")
-                intro_audio = await self.synthesizer.synthesize(script, GUARD_PROFILE)
-
-            track_msg = await channel.send(
-                "🎮 **Red Light Green Light starting in 5 seconds!** Listen closely to doll audio cues.",
-                embed=build_red_light_embed("GREEN", 100, {}, round_num=1, max_rounds=5)
-            )
-            if intro_audio:
-                await _play_transient_audio(intro_audio, "intro.wav")
-            await asyncio.sleep(5.0)
-
-            for round_num in range(1, 6):
-                game = self.squid_service.get_active_game(guild_id)
-                if not game:
-                    break
-
-                # 1. GREEN LIGHT
-                self.squid_service.set_light(guild_id, "GREEN", round_num=round_num)
-                green_embed = build_red_light_embed(
-                    "GREEN",
-                    game.get("target", 100),
-                    game.get("progress", {}),
-                    round_num=round_num,
-                    max_rounds=5
-                )
-                try:
-                    await track_msg.edit(content=None, embed=green_embed)
-                    await track_msg.clear_reactions()
-                    await track_msg.add_reaction("🔊")
-                except Exception:
-                    track_msg = await channel.send(embed=green_embed)
-
-                green_audio = (
-                    self.squid_service.get_cached_audio("green_korean")
-                    or self.squid_service.get_cached_audio("green_english")
-                )
-                if green_audio:
-                    await _play_transient_audio(green_audio, "doll_green.wav")
-
-                chant_duration = max(3.5, 6.5 - (round_num * 0.5)) + random.uniform(-0.3, 0.3)
-                await asyncio.sleep(chant_duration)
-
-                # 2. RED LIGHT
-                self.squid_service.set_light(guild_id, "RED", round_num=round_num)
-                game = self.squid_service.get_active_game(guild_id)
-                red_embed = build_red_light_embed(
-                    "RED",
-                    game.get("target", 100) if game else 100,
-                    game.get("progress", {}) if game else {},
-                    round_num=round_num,
-                    max_rounds=5
-                )
-                try:
-                    await track_msg.edit(content=None, embed=red_embed)
-                    await track_msg.clear_reactions()
-                    await track_msg.add_reaction("🚨")
-                except Exception:
-                    track_msg = await channel.send(embed=red_embed)
-
-                red_audio = self.squid_service.get_cached_audio("red")
-                if red_audio:
-                    await _play_transient_audio(red_audio, "doll_red.wav")
-
-                red_duration = random.uniform(3.5, 5.0)
-                await asyncio.sleep(red_duration)
-
-                # Check if all players were wiped out
-                alive_contestants = await self.squid_service.squid_repo.list_players(guild_id, alive_only=True)
-                if not alive_contestants:
-                    await channel.send("💀 **SQUID GAME • TOTAL EXTINCTION**\n*All contestants on the field have been eliminated. Zero survivors.*")
-                    break
-
-            # Timeout check for players who didn't cross 100m
-            timeout_elims = await self.squid_service.timeout_slacking_players(guild_id)
-            if timeout_elims:
-                for e in timeout_elims:
-                    await self._swap_to_spectator(channel.guild, e.user_id)
-                names = ", ".join(f"<@{e.user_id}>" for e in timeout_elims)
-                await channel.send(f"⏰ **TIME EXPIRED!** Eliminated for failing to reach 100m:\n{names}")
-
-            self.squid_service.end_red_light_game(guild_id)
-            final_status = await self.squid_service.get_status(guild_id)
-            summary_embed = build_squid_status_embed(final_status)
-            await channel.send("🏁 **Session completed!** Final arena metrics:", embed=summary_embed)
-        except asyncio.CancelledError:
-            logger.info("Red light automated session cancelled for guild %s", guild_id)
-        except Exception as e:
-            logger.error("Error in automated red light session: %s", e, exc_info=True)
-            self.squid_service.end_red_light_game(guild_id)
 
 async def setup(bot: commands.Bot):
     # Cogs mounted directly in bot.py

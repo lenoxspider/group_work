@@ -137,7 +137,7 @@ class AdminCog(commands.Cog, name="Administration"):
             }),
             ("game-hub", "🎮 Squid Game Arena. Only active Players can execute commands.", {
                 guild.default_role: discord.PermissionOverwrite(
-                    view_channel=True, read_message_history=True, send_messages=False, use_application_commands=False
+                    view_channel=True, read_message_history=True, send_messages=False, use_application_commands=True
                 ),
                 guild.me: bot_full,
                 **(
