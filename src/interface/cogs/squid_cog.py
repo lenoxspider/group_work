@@ -30,6 +30,8 @@ from src.interface.squid_formatters import (
 )
 from src.domain.errors import AppError
 from src.interface.red_light_runner import RedLightRunner
+from src.interface.channel_router import ChannelRouter
+from src.interface.views.move_view import MoveView
 
 logger = logging.getLogger("interface.cogs.squid")
 
@@ -41,15 +43,37 @@ class SquidCog(commands.GroupCog, group_name="squid"):
         bot: commands.Bot,
         squid_service: SquidService,
         audio_deliverer: AudioDeliverer,
-        synthesizer: Optional[SpeechSynthesizer] = None
+        synthesizer: Optional[SpeechSynthesizer] = None,
+        channel_router: Optional[ChannelRouter] = None
     ):
         self.bot = bot
         self.squid_service = squid_service
         self.audio_deliverer = audio_deliverer
         self.synthesizer = synthesizer
-        self.runner = RedLightRunner(bot, squid_service, audio_deliverer, synthesizer)
+        self.channel_router = channel_router
+        self.runner = RedLightRunner(
+            bot, squid_service, audio_deliverer, synthesizer, channel_router=channel_router
+        )
         self._running_tasks: dict = {}
         super().__init__()
+
+    async def cog_load(self):
+        """Registers persistent views and resets stale sessions across restarts."""
+        self.bot.add_view(MoveView(self.squid_service, self.channel_router))
+        self.squid_service.reset_all_games()
+
+    async def _ensure_game_hub(self, interaction: discord.Interaction) -> bool:
+        """Enforces that gameplay commands execute only inside #game-hub."""
+        if not interaction.guild or not self.channel_router:
+            return True
+        hub = await self.channel_router.resolve(interaction.guild, "game-hub")
+        if hub and interaction.channel_id != hub.id:
+            await interaction.followup.send(
+                f"⚠️ **Wrong Arena:** Squid Game commands can only be played in {hub.mention}!",
+                ephemeral=True
+            )
+            return False
+        return True
 
     def cog_unload(self):
         for task in self._running_tasks.values():
@@ -93,6 +117,9 @@ class SquidCog(commands.GroupCog, group_name="squid"):
         try:
             await interaction.response.defer()
         except discord.NotFound:
+            return
+
+        if not await self._ensure_game_hub(interaction):
             return
 
         guild_id = str(interaction.guild_id)
@@ -227,6 +254,9 @@ class SquidCog(commands.GroupCog, group_name="squid"):
         except discord.NotFound:
             return
 
+        if not await self._ensure_game_hub(interaction):
+            return
+
         guild_id = str(interaction.guild_id)
         if action == "stop":
             running = self._running_tasks.pop(guild_id, None)
@@ -262,7 +292,9 @@ class SquidCog(commands.GroupCog, group_name="squid"):
         await interaction.followup.send(
             f"🎮 **{len(alive_players)} contestant(s) assembled on the track! Initiating Red Light Green Light session...**"
         )
-        task = self.bot.loop.create_task(self.runner.run(interaction.channel, guild_id))
+        task = self.bot.loop.create_task(
+            self.runner.run(interaction.channel, guild_id, on_cleanup=lambda gid: self._running_tasks.pop(gid, None))
+        )
         self._running_tasks[guild_id] = task
 
 async def setup(bot: commands.Bot):

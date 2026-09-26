@@ -127,8 +127,12 @@ class GroupAccountabilityBot(commands.Bot):
         if self.voice_service and self.audio_deliverer:
             await self.add_cog(VoiceCog(self, self.voice_service, self.audio_deliverer))
         if self.audio_deliverer:
-            await self.add_cog(SquidCog(self, self.squid_service, self.audio_deliverer, self.speech_synthesizer))
-            await self.add_cog(MoveCommandCog(self, self.squid_service, self.audio_deliverer))
+            await self.add_cog(SquidCog(
+                self, self.squid_service, self.audio_deliverer, self.speech_synthesizer, self.channel_router
+            ))
+            await self.add_cog(MoveCommandCog(
+                self, self.squid_service, self.audio_deliverer, self.channel_router
+            ))
         logger.info("All Cogs mounted successfully.")
 
         # Re-sync and cleanup game session state on startup

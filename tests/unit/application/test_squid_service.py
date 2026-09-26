@@ -89,10 +89,54 @@ class TestSquidService(unittest.IsolatedAsyncioTestCase):
         self.service.set_light("111", "GREEN")
 
         dto = RedLightMoveDTO(guild_id="111", user_id="222")
-        result = await self.service.process_move(dto)
+        # 1. Safe step
+        r1 = await self.service.process_move(dto)
+        self.assertTrue(r1.survived)
+        self.assertIn("Safe step", r1.status_message)
 
-        self.assertTrue(result.survived)
-        self.assertGreater(result.distance, 0)
+        # 2. Sprint burst (clear last_taps to simulate waiting >0.5s)
+        self.service._active_games["111"]["last_taps"]["222"] = 0.0
+        r2 = await self.service.process_move(dto)
+        self.assertTrue(r2.survived)
+        self.assertIn("Sprint burst", r2.status_message)
+
+        # 3. Third move blocked in same round
+        self.service._active_games["111"]["last_taps"]["222"] = 0.0
+        r3_limit = await self.service.process_move(dto)
+        self.assertEqual(r3_limit.status_code, "sprint_limit")
+        self.assertIn("limit reached", r3_limit.status_message.lower())
+
+        # 4. Next round resets moves limit
+        self.service.set_light("111", "GREEN", round_num=2)
+        self.service._active_games["111"]["last_taps"]["222"] = 0.0
+        r3 = await self.service.process_move(dto)
+        self.assertTrue(r3.survived)
+        self.assertIn("Safe step", r3.status_message)
+
+    async def test_sprint_momentum_tightens_red_light_grace(self):
+        player = SquidPlayer(guild_id="111", user_id="222", player_number="001")
+        season = SquidSeason(guild_id="111")
+        self.mock_repo.get_player.return_value = player
+        self.mock_repo.get_season.return_value = season
+
+        self.service.start_red_light_game("111", target=100)
+        self.service.set_light("111", "GREEN")
+
+        dto = RedLightMoveDTO(guild_id="111", user_id="222")
+        # Take 2 moves to enter sprinting state
+        await self.service.process_move(dto)
+        self.service._active_games["111"]["last_taps"]["222"] = 0.0
+        await self.service.process_move(dto)
+
+        # Red light turns
+        self.service.set_light("111", "RED")
+        # Elapsed 0.35s: greater than sprint grace (0.2s), but less than normal grace (0.5s)
+        self.service._active_games["111"]["red_light_time"] = time.monotonic() - 0.35
+        self.service._active_games["111"]["last_taps"]["222"] = 0.0
+
+        result = await self.service.process_move(dto)
+        self.assertFalse(result.survived)
+        self.assertIn("eliminated", result.status_message.lower())
 
     async def test_preload_audio_cache(self):
         await self.service.preload_audio_cache()

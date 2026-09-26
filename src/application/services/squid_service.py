@@ -14,7 +14,7 @@ What it does NOT do:
 import time
 import random
 from datetime import datetime, timezone
-from typing import Optional, Dict
+from typing import Optional, Dict, Callable
 from src.domain.entities.squid_player import SquidPlayer
 from src.domain.entities.squid_season import SquidSeason
 from src.domain.entities.movement_anomaly import MovementAnomaly
@@ -37,14 +37,26 @@ class SquidService:
     def __init__(
         self,
         squid_repo: SquidRepository,
-        synthesizer: Optional[SpeechSynthesizer] = None
+        synthesizer: Optional[SpeechSynthesizer] = None,
+        clock: Optional[Callable[[], float]] = None,
+        rng: Optional[random.Random] = None
     ):
+        from src.application.services.red_light_service import RedLightService
         self.squid_repo = squid_repo
         self.synthesizer = synthesizer
-        # In-memory active game state per guild: {guild_id: dict}
-        self._active_games: Dict[str, dict] = {}
-        # In-memory preloaded audio buffer cache
+        self.clock = clock or time.monotonic
+        self.rng = rng or random.Random()
+        self.red_light_service = RedLightService(
+            squid_repo=self.squid_repo,
+            clock=self.clock,
+            rng=self.rng,
+            eliminate_callback=self.eliminate_player
+        )
         self._audio_cache: Dict[str, bytes] = {}
+
+    @property
+    def _active_games(self) -> Dict[str, dict]:
+        return self.red_light_service._active_games
 
     async def preload_audio_cache(self) -> None:
         """Pre-synthesizes standard audio cues into memory to eliminate runtime latency."""
@@ -157,47 +169,31 @@ class SquidService:
 
     def start_red_light_game(self, guild_id: str, target: int = 100) -> None:
         """Starts a Red Light Green Light session for the guild."""
-        self._active_games[guild_id] = {
-            "light": "GREEN",
-            "progress": {},
-            "target": target,
-            "finished": set(),
-            "round": 1,
-            "red_light_time": 0.0
-        }
+        self.red_light_service.start_game(guild_id, target)
 
     def set_light(self, guild_id: str, light: str, round_num: Optional[int] = None) -> None:
         """Toggles the current doll signal (GREEN or RED) and marks timestamp."""
-        clean_light = light.upper().strip()
-        if clean_light not in {"GREEN", "RED"}:
-            raise ValidationError(f"Invalid light state '{light}'. Must be 'GREEN' or 'RED'.")
-        if guild_id in self._active_games:
-            self._active_games[guild_id]["light"] = clean_light
-            if clean_light == "RED":
-                self._active_games[guild_id]["red_light_time"] = time.monotonic()
-            if round_num is not None:
-                self._active_games[guild_id]["round"] = round_num
+        self.red_light_service.set_light(guild_id, light, round_num)
 
     def get_light(self, guild_id: str) -> str:
         """Gets current light status."""
-        game = self._active_games.get(guild_id)
-        return game["light"] if game else "NONE"
+        return self.red_light_service.get_light(guild_id)
 
     def get_active_game(self, guild_id: str) -> Optional[dict]:
         """Returns read-only copy of active game state."""
-        return self._active_games.get(guild_id)
+        return self.red_light_service.get_active_game(guild_id)
 
     def end_red_light_game(self, guild_id: str) -> None:
         """Terminates active session for guild."""
-        self._active_games.pop(guild_id, None)
+        self.red_light_service.end_game(guild_id)
 
     def reset_all_games(self) -> None:
         """Resets all in-memory game sessions on bot reboot."""
-        self._active_games.clear()
+        self.red_light_service.reset_all_games()
 
     async def timeout_slacking_players(self, guild_id: str) -> list[EliminationResultDTO]:
         """Eliminates all contestants who failed to reach the finish line before time expired."""
-        game = self._active_games.get(guild_id)
+        game = self.get_active_game(guild_id)
         if not game:
             return []
 
@@ -229,12 +225,7 @@ class SquidService:
 
     async def get_active_racers(self, guild_id: str) -> list[SquidPlayer]:
         """Returns living contestants who have not yet crossed the finish line."""
-        game = self._active_games.get(guild_id)
-        if not game:
-            return []
-        finished_users = game.get("finished", set())
-        alive_players = await self.squid_repo.list_players(guild_id, alive_only=True)
-        return [p for p in alive_players if p.user_id not in finished_users]
+        return await self.red_light_service.get_active_racers(guild_id)
 
     async def clear_session(self, guild_id: str) -> None:
         """Clears active session game state and resets contestant roster."""
@@ -243,101 +234,16 @@ class SquidService:
 
     def _calculate_advance(self, round_num: int) -> int:
         """Dynamic step distance: narrows each round as tension increases."""
-        base_min = max(5, 16 - (round_num - 1) * 2)
-        base_max = max(12, 26 - (round_num - 1) * 2)
-        return random.randint(base_min, base_max)
+        return self.red_light_service._calculate_advance(round_num)
+
+    async def handle_move(self, guild_id: str, user_id: str) -> RedLightMoveResultDTO:
+        """Evaluates move attempt with guard sequence 1.5."""
+        return await self.red_light_service.handle_move(guild_id, user_id)
 
     async def process_move(self, dto: RedLightMoveDTO) -> RedLightMoveResultDTO:
-        """Evaluates a /move attempt by an enrolled player with latency grace protection."""
-        game = self._active_games.get(dto.guild_id)
-        if not game:
-            raise ValidationError("No Red Light Green Light game is currently active.")
+        """Backwards-compatible wrapper delegating to handle_move."""
+        return await self.handle_move(dto.guild_id, dto.user_id)
 
-        player = await self.squid_repo.get_player(dto.guild_id, dto.user_id)
-        if not player:
-            raise ValidationError("You are not enrolled in the games. Run /squid join first.")
-        if not player.is_alive:
-            raise ValidationError(f"{player.display_tag} is eliminated and cannot move.")
-
-        if dto.user_id in game["finished"]:
-            return RedLightMoveResultDTO(
-                guild_id=dto.guild_id,
-                user_id=dto.user_id,
-                player_number=player.player_number,
-                survived=True,
-                distance=game["target"],
-                is_finished=True,
-                status_message=f"{player.display_tag} has already crossed the finish line!"
-            )
-
-        if game["light"] == "RED":
-            red_start = game.get("red_light_time", 0.0)
-            elapsed = time.monotonic() - red_start if red_start > 0 else 999.0
-            if elapsed <= 0.5:
-                # Latency grace period: record close-call anomaly but spare player
-                anomaly = MovementAnomaly(
-                    guild_id=dto.guild_id,
-                    user_id=dto.user_id,
-                    occurred_at=datetime.now(timezone.utc),
-                    reason=f"Close call ({elapsed:.2f}s latency grace)"
-                )
-                await self.squid_repo.record_anomaly(anomaly)
-                return RedLightMoveResultDTO(
-                    guild_id=dto.guild_id,
-                    user_id=dto.user_id,
-                    player_number=player.player_number,
-                    survived=True,
-                    distance=game["progress"].get(dto.user_id, 0),
-                    is_finished=False,
-                    status_message=f"⚠️ Close call! Stopped within {elapsed:.2f}s grace window. Freeze immediately!"
-                )
-
-            # Red light elimination
-            anomaly = MovementAnomaly(
-                guild_id=dto.guild_id,
-                user_id=dto.user_id,
-                occurred_at=datetime.now(timezone.utc),
-                reason=f"Moved during Red Light ({elapsed:.2f}s elapsed)"
-            )
-            await self.squid_repo.record_anomaly(anomaly)
-            elim_result = await self.eliminate_player(
-                guild_id=dto.guild_id,
-                user_id=dto.user_id,
-                reason="Moved during Red Light",
-                synthesize_audio=True
-            )
-            return RedLightMoveResultDTO(
-                guild_id=dto.guild_id,
-                user_id=dto.user_id,
-                player_number=player.player_number,
-                survived=False,
-                distance=game["progress"].get(dto.user_id, 0),
-                is_finished=False,
-                status_message="Movement detected during Red Light! You have been eliminated.",
-                audio_bytes=elim_result.audio_bytes
-            )
-
-        # GREEN LIGHT -> Advance distance based on current round difficulty
-        round_num = game.get("round", 1)
-        advance = self._calculate_advance(round_num)
-        current = game["progress"].get(dto.user_id, 0) + advance
-        game["progress"][dto.user_id] = current
-
-        is_finished = current >= game["target"]
-        if is_finished:
-            game["finished"].add(dto.user_id)
-            player.advance_survival()
-            await self.squid_repo.save_player(player)
-
-        return RedLightMoveResultDTO(
-            guild_id=dto.guild_id,
-            user_id=dto.user_id,
-            player_number=player.player_number,
-            survived=True,
-            distance=min(current, game["target"]),
-            is_finished=is_finished,
-            status_message=f"Advanced +{advance}m! Progress: {min(current, game['target'])}/{game['target']}m."
-        )
 
     def _to_player_dto(self, player: SquidPlayer) -> PlayerResultDTO:
         return PlayerResultDTO(

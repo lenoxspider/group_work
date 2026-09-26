@@ -15,7 +15,7 @@ What it does NOT do:
 import logging
 import asyncio
 import random
-from typing import Optional
+from typing import Optional, Callable
 import discord
 
 from src.application.services.squid_service import SquidService
@@ -23,8 +23,12 @@ from src.domain.interfaces.audio_deliverer import AudioDeliverer
 from src.domain.interfaces.speech_synthesizer import SpeechSynthesizer
 from src.domain.entities.guard_voice import GuardVoiceLines, GUARD_PROFILE
 from src.interface.squid_formatters import build_red_light_embed, build_squid_status_embed
+from src.interface.views.move_view import MoveView
+from src.interface.channel_router import ChannelRouter
 
 logger = logging.getLogger("interface.red_light_runner")
+
+ALLOWED_MENTIONS = discord.AllowedMentions(users=True, roles=False, everyone=False)
 
 class RedLightRunner:
     """Orchestrates automated game loop, audio cues, state checks, and arena cleanup."""
@@ -34,16 +38,24 @@ class RedLightRunner:
         bot: discord.Client,
         squid_service: SquidService,
         audio_deliverer: AudioDeliverer,
-        synthesizer: Optional[SpeechSynthesizer] = None
+        synthesizer: Optional[SpeechSynthesizer] = None,
+        channel_router: Optional[ChannelRouter] = None
     ):
         self.bot = bot
         self.squid_service = squid_service
         self.audio_deliverer = audio_deliverer
         self.synthesizer = synthesizer
+        self.channel_router = channel_router
 
-    async def run(self, channel: discord.abc.Messageable, guild_id: str) -> None:
+    async def run(
+        self,
+        channel: discord.abc.Messageable,
+        guild_id: str,
+        on_cleanup: Optional[Callable[[str], None]] = None
+    ) -> None:
         """Executes the complete Red Light Green Light match lifecycle."""
         active_audio_msg: Optional[discord.Message] = None
+        track_msg: Optional[discord.Message] = None
 
         async def _play_transient_audio(audio_bytes: bytes, filename: str) -> None:
             nonlocal active_audio_msg
@@ -74,13 +86,48 @@ class RedLightRunner:
                 script = GuardVoiceLines.game_announcement("Red Light Green Light")
                 intro_audio = await self.synthesizer.synthesize(script, GUARD_PROFILE)
 
-            track_msg = await channel.send(
-                "🎮 **Red Light Green Light starting in 5 seconds!** Listen closely to doll audio cues.",
-                embed=build_red_light_embed("GREEN", 100, {}, round_num=1, max_rounds=5)
+            living = await self.squid_service.squid_repo.list_players(guild_id, alive_only=True)
+            move_view = MoveView(self.squid_service, self.channel_router)
+            initial_embed = build_red_light_embed(
+                light="GREEN",
+                target=100,
+                progress={},
+                round_num=1,
+                max_rounds=5,
+                alive_count=len(living)
             )
+            track_msg = await channel.send(
+                embed=initial_embed,
+                view=move_view,
+                allowed_mentions=ALLOWED_MENTIONS
+            )
+            try:
+                await track_msg.pin()
+            except Exception:
+                pass
+
             if intro_audio:
                 await _play_transient_audio(intro_audio, "intro.wav")
             await asyncio.sleep(5.0)
+
+            async def _sleep_with_debounce(duration: float, light: str, round_num: int) -> None:
+                loop = asyncio.get_event_loop()
+                end_time = loop.time() + duration
+                while True:
+                    now = loop.time()
+                    remaining = end_time - now
+                    if remaining <= 0:
+                        break
+                    step = min(remaining, 1.5)
+                    await asyncio.sleep(step)
+                    game_state = self.squid_service.get_active_game(guild_id)
+                    if game_state and game_state.get("board_dirty"):
+                        game_state["board_dirty"] = False
+                        embed = await self._build_board_embed(guild_id, light, round_num)
+                        try:
+                            await track_msg.edit(content=None, embed=embed, allowed_mentions=ALLOWED_MENTIONS)
+                        except Exception:
+                            pass
 
             for round_num in range(1, 6):
                 game = self.squid_service.get_active_game(guild_id)
@@ -94,19 +141,11 @@ class RedLightRunner:
 
                 # 1. GREEN LIGHT
                 self.squid_service.set_light(guild_id, "GREEN", round_num=round_num)
-                green_embed = build_red_light_embed(
-                    "GREEN",
-                    game.get("target", 100),
-                    game.get("progress", {}),
-                    round_num=round_num,
-                    max_rounds=5
-                )
+                green_embed = await self._build_board_embed(guild_id, "GREEN", round_num)
                 try:
-                    await track_msg.edit(content=None, embed=green_embed)
-                    await track_msg.clear_reactions()
-                    await track_msg.add_reaction("🔊")
+                    await track_msg.edit(content=None, embed=green_embed, allowed_mentions=ALLOWED_MENTIONS)
                 except Exception:
-                    track_msg = await channel.send(embed=green_embed)
+                    pass
 
                 green_audio = (
                     self.squid_service.get_cached_audio("green_korean")
@@ -116,38 +155,27 @@ class RedLightRunner:
                     await _play_transient_audio(green_audio, "doll_green.wav")
 
                 chant_duration = max(3.5, 6.5 - (round_num * 0.5)) + random.uniform(-0.3, 0.3)
-                await asyncio.sleep(chant_duration)
+                await _sleep_with_debounce(chant_duration, "GREEN", round_num)
 
-                # Post-green check: did all active contestants reach 100m?
                 active_racers = await self.squid_service.get_active_racers(guild_id)
                 if not active_racers:
                     break
 
                 # 2. RED LIGHT
                 self.squid_service.set_light(guild_id, "RED", round_num=round_num)
-                game = self.squid_service.get_active_game(guild_id)
-                red_embed = build_red_light_embed(
-                    "RED",
-                    game.get("target", 100) if game else 100,
-                    game.get("progress", {}) if game else {},
-                    round_num=round_num,
-                    max_rounds=5
-                )
+                red_embed = await self._build_board_embed(guild_id, "RED", round_num)
                 try:
-                    await track_msg.edit(content=None, embed=red_embed)
-                    await track_msg.clear_reactions()
-                    await track_msg.add_reaction("🚨")
+                    await track_msg.edit(content=None, embed=red_embed, allowed_mentions=ALLOWED_MENTIONS)
                 except Exception:
-                    track_msg = await channel.send(embed=red_embed)
+                    pass
 
                 red_audio = self.squid_service.get_cached_audio("red")
                 if red_audio:
                     await _play_transient_audio(red_audio, "doll_red.wav")
 
                 red_duration = random.uniform(3.5, 5.0)
-                await asyncio.sleep(red_duration)
+                await _sleep_with_debounce(red_duration, "RED", round_num)
 
-                # Post-red check: were remaining contestants eliminated?
                 active_racers = await self.squid_service.get_active_racers(guild_id)
                 if not active_racers:
                     break
@@ -176,19 +204,46 @@ class RedLightRunner:
             summary_embed = build_squid_status_embed(final_status)
             await channel.send("🏁 **Session completed!** Final arena metrics:", embed=summary_embed)
 
-            # Clear session state and reset roles for next game
-            await self.squid_service.clear_session(guild_id)
-            if guild:
-                await self._cleanup_guild_roles(guild)
-
             await channel.send("🧹 **Session data cleared.** Contestants must use `/squid join` to register for the next match.")
 
         except asyncio.CancelledError:
             logger.info("Red light automated session cancelled for guild %s", guild_id)
-            await self.squid_service.clear_session(guild_id)
+            raise
         except Exception as e:
             logger.error("Error in automated red light session: %s", e, exc_info=True)
+            raise
+        finally:
+            if track_msg:
+                try:
+                    await track_msg.unpin()
+                except Exception:
+                    pass
             await self.squid_service.clear_session(guild_id)
+            guild = getattr(channel, "guild", None)
+            if guild:
+                await self._cleanup_guild_roles(guild)
+            if on_cleanup:
+                try:
+                    on_cleanup(guild_id)
+                except Exception as err:
+                    logger.warning("Error running on_cleanup callback for guild %s: %s", guild_id, err)
+
+    async def _build_board_embed(self, guild_id: str, light: str, round_num: int) -> discord.Embed:
+        """Helper to build consistent mobile-first embed with live survivor counts."""
+        game = self.squid_service.get_active_game(guild_id)
+        target = game.get("target", 100) if game else 100
+        progress = game.get("progress", {}) if game else {}
+        elims = game.get("eliminated_this_round", []) if game else []
+        living = await self.squid_service.squid_repo.list_players(guild_id, alive_only=True)
+        return build_red_light_embed(
+            light=light,
+            target=target,
+            progress=progress,
+            round_num=round_num,
+            max_rounds=5,
+            alive_count=len(living),
+            eliminated_names=elims
+        )
 
     async def _swap_to_spectator(self, guild: discord.Guild, user_id: str) -> None:
         """Atomically demotes eliminated member to Spectator."""

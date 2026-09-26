@@ -79,7 +79,8 @@ discord_group_work/
 │   │       ├── activity_service.py  # Metrics use cases (record message, generate reports)
 │   │       ├── preference_service.py# Preference use cases (set timezone, quiet hours, DND evaluation)
 │   │       ├── voice_service.py     # Voice use cases (speech synthesis, alert scripts, report briefings)
-│   │       ├── squid_service.py     # Squid Game use cases (enrollment 001-456, elimination audio, pot tally, RLGL game)
+│   │       ├── squid_service.py     # Squid Game use cases (enrollment 001-456, elimination audio, pot tally)
+│   │       ├── red_light_service.py # Red Light Green Light session state, rate limiting, and move progression
 │   │       ├── vault_service.py     # Vault use cases (verify SHA-256, store, record submission)
 │   │       ├── project_service.py   # Lifecycle use cases (status dashboard, finish/archive)
 │   │       └── extension_service.py # Extension use cases (request, cast vote, majority conclude)
@@ -114,6 +115,8 @@ discord_group_work/
 │       ├── red_light_runner.py      # Automated RLGL match execution, early conditional end & arena cleanup
 │       ├── discord_formatters.py    # Discord Embed card formatters (Hot Pink #FF0090 Squid styling)
 │       ├── squid_formatters.py      # Specialized Squid Game enrollment, track status, and elimination embeds
+│       ├── views/
+│       │   └── move_view.py         # Persistent MoveView with custom_id="rlgl:move" and unchanging label
 │       └── cogs/
 │           ├── __init__.py
 │           ├── task_buttons.py      # Persistent TaskActionView (Nudge, In-Progress, Complete, Verify, Extend)

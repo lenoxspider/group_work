@@ -67,4 +67,10 @@ class RedLightMoveResultDTO:
     distance: int
     is_finished: bool
     status_message: str
+    advance: int = 0
+    target: int = 100
+    rank: int = 1
+    total_racers: int = 1
+    is_rate_limited: bool = False
+    status_code: str = "ok"
     audio_bytes: Optional[bytes] = None
