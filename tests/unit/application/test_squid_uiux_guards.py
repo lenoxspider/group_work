@@ -28,6 +28,12 @@ class InMemorySquidRepository(SquidRepository):
     async def get_player(self, guild_id: str, user_id: str) -> Optional[SquidPlayer]:
         return self.players.get((guild_id, user_id))
 
+    async def get_player_by_number(self, guild_id: str, player_number: str) -> Optional[SquidPlayer]:
+        for p in self.players.values():
+            if p.guild_id == guild_id and p.player_number == player_number:
+                return p
+        return None
+
     async def save_player(self, player: SquidPlayer) -> None:
         self.players[(player.guild_id, player.user_id)] = player
 
