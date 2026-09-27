@@ -30,6 +30,11 @@ class CommunityPlugin(Plugin):
                 "👋 New members introduce themselves here. Task #1 for every catizen.",
                 "recruits",
             ),
+            ChannelDecl(
+                "tribunal",
+                "⚖️ The court. Cases are tried here; citizens judge by reaction or /court vote.",
+                "court",
+            ),
         ]
 
     def wire(self, registry) -> None:

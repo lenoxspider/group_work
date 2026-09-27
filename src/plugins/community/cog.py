@@ -1,19 +1,61 @@
-"""Community Cog - onboarding, the constitution sign, and membership status."""
+"""Community Cog - onboarding, the constitution, and the tribunal."""
 
 import logging
 from typing import Literal, Optional
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
+from src.domain.errors import AppError
 from src.interface.channel_router import ChannelRouter
-from src.plugins.community.domain import CATIZEN, CITIZEN
+from src.plugins.community.checks import requires_citizen
+from src.plugins.community.domain import (
+    CASE_ACQUITTED,
+    CASE_CONVICTED,
+    CASE_LAPSED,
+    CASE_OPEN,
+    CATIZEN,
+    CITIZEN,
+    Case,
+)
 from src.plugins.community.service import CommunityService
 
 logger = logging.getLogger("plugins.community.cog")
 
 PINK = discord.Color.from_rgb(255, 0, 144)
+GUILTY_EMOJI = "✅"
+INNOCENT_EMOJI = "❌"
+
+_STATUS_LABEL = {
+    CASE_OPEN: "⚖️ OPEN",
+    CASE_CONVICTED: "🔨 CONVICTED",
+    CASE_ACQUITTED: "🕊️ ACQUITTED",
+    CASE_LAPSED: "⌛ LAPSED (no quorum)",
+}
+
+
+def _case_embed(case: Case, law_title: str, law_fine: int) -> discord.Embed:
+    round_note = " · APPEAL ROUND" if case.round >= 2 else ""
+    embed = discord.Embed(title=f"⚖️ CASE {case.case_id}{round_note}", color=PINK)
+    embed.add_field(name="Accused", value=f"<@{case.accused_id}>", inline=True)
+    embed.add_field(name="Accuser", value=f"<@{case.accuser_id}>", inline=True)
+    embed.add_field(
+        name="Law",
+        value=f"`{case.law_id}` {law_title}" + (f" · fine {law_fine} spi" if law_fine else ""),
+        inline=False,
+    )
+    embed.add_field(name="Evidence", value=(case.evidence[:1000] or "*none presented*"), inline=False)
+    if case.defense:
+        embed.add_field(name="Defense", value=case.defense[:1000], inline=False)
+    embed.add_field(name="Verdict", value=_STATUS_LABEL.get(case.status, case.status), inline=True)
+    embed.add_field(
+        name="Jury",
+        value=f"🔨 {len(case.guilty())} guilty · 🕊️ {len(case.innocent())} innocent",
+        inline=True,
+    )
+    embed.set_footer(text=f"Vote ✅ guilty / ❌ innocent, or /court vote {case.case_id} <guilty|innocent>")
+    return embed
 
 
 class CommunityCog(commands.Cog, name="Community"):
@@ -26,18 +68,42 @@ class CommunityCog(commands.Cog, name="Community"):
         self.bot = bot
         self.service = service
         self.channel_router = channel_router
+        self.court_loop.start()
 
     citizens = app_commands.Group(name="citizens", description="Membership administration")
+    court = app_commands.Group(name="court", description="The tribunal - citizens judge the law")
 
-    async def _new_recruits_channel(self, guild: discord.Guild):
-        if self.channel_router:
-            return await self.channel_router.resolve(guild, "new-recruits")
-        return discord.utils.get(guild.text_channels, name="new-recruits")
+    def cog_unload(self):
+        self.court_loop.cancel()
 
-    async def _town_hall_channel(self, guild: discord.Guild):
+    # --- Channel helpers ---
+
+    async def _channel(self, guild: discord.Guild, name: str):
         if self.channel_router:
-            return await self.channel_router.resolve(guild, "town-hall")
-        return discord.utils.get(guild.text_channels, name="town-hall")
+            return await self.channel_router.resolve(guild, name)
+        return discord.utils.get(guild.text_channels, name=name)
+
+    async def _new_recruits_channel(self, guild):
+        return await self._channel(guild, "new-recruits")
+
+    async def _town_hall_channel(self, guild):
+        return await self._channel(guild, "town-hall")
+
+    async def _tribunal_channel(self, guild):
+        return await self._channel(guild, "tribunal")
+
+    async def _law(self, law_id: str):
+        if not self.service.society:
+            return None
+        try:
+            return await self.service.society.get_law(law_id)
+        except Exception:
+            return None
+
+    def _role(self, guild: discord.Guild, name: str):
+        return discord.utils.get(guild.roles, name=name)
+
+    # --- Onboarding ---
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
@@ -48,7 +114,7 @@ class CommunityCog(commands.Cog, name="Community"):
         await self.service.on_join(guild_id, user_id)
 
         try:
-            catizen_role = discord.utils.get(member.guild.roles, name="Catizen")
+            catizen_role = self._role(member.guild, "Catizen")
             if catizen_role and catizen_role not in member.roles:
                 await member.add_roles(catizen_role, reason="New recruit - access to #new-recruits")
         except Exception as e:
@@ -121,6 +187,72 @@ class CommunityCog(commands.Cog, name="Community"):
             except Exception as e:
                 logger.warning("Could not post welcome-bridge to #town-hall: %s", e)
 
+    # --- Tribunal reaction voting ---
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        if self.bot.user and payload.user_id == self.bot.user.id:
+            return
+        emoji = str(payload.emoji)
+        if emoji not in (GUILTY_EMOJI, INNOCENT_EMOJI):
+            return
+        try:
+            case = await self.service.get_case_by_message(str(payload.message_id))
+        except Exception:
+            return
+        if not case or case.status != CASE_OPEN:
+            return
+        decision = "guilty" if emoji == GUILTY_EMOJI else "innocent"
+        try:
+            updated = await self.service.court_vote(case.guild_id, case.case_id, str(payload.user_id), decision)
+            await self._refresh_case_card(updated)
+        except Exception:
+            # invalid voter (catizen / conflicted) - strip their reaction
+            try:
+                channel = self.bot.get_channel(payload.channel_id)
+                if channel:
+                    msg = await channel.fetch_message(payload.message_id)
+                    await msg.remove_reaction(payload.emoji, discord.Object(id=payload.user_id))
+            except Exception:
+                pass
+
+    async def _refresh_case_card(self, case: Case):
+        if case.message_id and case.channel_id:
+            try:
+                channel = self.bot.get_channel(int(case.channel_id))
+                if channel:
+                    msg = await channel.fetch_message(int(case.message_id))
+                    law = await self._law(case.law_id)
+                    await msg.edit(embed=_case_embed(case, law.title if law else case.law_id, law.fine_amount if law else 0))
+            except Exception as e:
+                logger.warning("Could not refresh case card %s: %s", case.case_id, e)
+
+    @tasks.loop(minutes=5)
+    async def court_loop(self):
+        for guild in self.bot.guilds:
+            try:
+                result = await self.service.sweep_court(str(guild.id))
+            except Exception as e:
+                logger.warning("Court sweep failed for %s: %s", guild.id, e)
+                continue
+            tribunal = await self._tribunal_channel(guild)
+            for closed in result["closed"]:
+                case = closed["case"]
+                await self._refresh_case_card(case)
+                if tribunal:
+                    try:
+                        await tribunal.send(embed=_verdict_embed(closed))
+                    except Exception:
+                        pass
+            for sentence in result["sentenced"]:
+                await self._post_sentence(guild, sentence)
+
+    @court_loop.before_loop
+    async def before_court_loop(self):
+        await self.bot.wait_until_ready()
+
+    # --- Membership commands ---
+
     @app_commands.command(name="join", description="Sign the constitution and become a citizen")
     async def join(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -132,7 +264,7 @@ class CommunityCog(commands.Cog, name="Community"):
 
         if interaction.guild and isinstance(interaction.user, discord.Member):
             try:
-                catizen_role = discord.utils.get(interaction.guild.roles, name="Catizen")
+                catizen_role = self._role(interaction.guild, "Catizen")
                 if catizen_role and catizen_role in interaction.user.roles:
                     await interaction.user.remove_roles(catizen_role, reason="Signed the constitution")
             except Exception as e:
@@ -148,7 +280,7 @@ class CommunityCog(commands.Cog, name="Community"):
                 title="○ △ □ CONSTITUTION ACCEPTED",
                 description=(
                     f"**{interaction.user.display_name}**, you are now a **citizen**. 🗳️\n\n"
-                    "Voting in `/society` is unlocked. You accept the current constitution:\n"
+                    "Voting in `/society` and the `/court` are unlocked. You accept the current constitution:\n"
                     + law_lines
                 ),
                 color=PINK,
@@ -247,8 +379,8 @@ class CommunityCog(commands.Cog, name="Community"):
                 "automatic; it is *earned*.\n\n"
                 "🐱 **Catizen** - a newcomer who has not signed. They can read, but cannot spend "
                 "spi, take tasks, join the games, or vote.\n"
-                "🗳️ **Citizen** - one who has signed the constitution. Full rights, including "
-                "a vote in `/society`.\n\n"
+                "🗳️ **Citizen** - one who has signed the constitution. Full rights, including a "
+                "vote in `/society` and the judgement seat in `/court`.\n\n"
                 "**Already here? You are already a citizen** - veterans keep their standing, "
                 "nothing changes for you.\n\n"
                 "**New arrivals must:**\n"
@@ -266,3 +398,209 @@ class CommunityCog(commands.Cog, name="Community"):
             allowed_mentions=discord.AllowedMentions(everyone=True),
         )
         await interaction.followup.send(f"📢 Proclamation posted to {hall.mention}.", ephemeral=True)
+
+    # --- Tribunal commands ---
+
+    @court.command(name="accuse", description="Bring a charge against a comrade under a specific law")
+    @app_commands.describe(member="The accused", law_id="Law being broken (e.g. LAW-6BC282)", evidence="Your evidence against them")
+    @requires_citizen()
+    async def court_accuse(self, interaction: discord.Interaction, member: discord.Member, law_id: str, evidence: str):
+        await interaction.response.defer()
+        guild_id = str(interaction.guild_id)
+        try:
+            case = await self.service.file_case(
+                guild_id, str(interaction.user.id), str(member.id), law_id.strip().upper(), evidence
+            )
+        except AppError as e:
+            await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
+            return
+
+        tribunal = await self._tribunal_channel(interaction.guild)
+        if tribunal:
+            law = await self._law(case.law_id)
+            embed = _case_embed(case, law.title if law else case.law_id, law.fine_amount if law else 0)
+            try:
+                msg = await tribunal.send(embed=embed)
+                case.message_id = str(msg.id)
+                case.channel_id = str(tribunal.id)
+                await self.service.repo.save_case(case)
+                await msg.add_reaction(GUILTY_EMOJI)
+                await msg.add_reaction(INNOCENT_EMOJI)
+            except Exception as e:
+                logger.warning("Could not post case card: %s", e)
+
+        await interaction.followup.send(
+            f"⚖️ **Case {case.case_id} opened** against {member.mention} under `{case.law_id}`. The jury will judge."
+        )
+
+    @court.command(name="vote", description="Cast your verdict on an open case")
+    @app_commands.describe(case_id="Case ID (e.g. CASE-A1B2C3)", decision="Your verdict")
+    @requires_citizen()
+    async def court_vote(self, interaction: discord.Interaction, case_id: str, decision: Literal["guilty", "innocent"]):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            case = await self.service.court_vote(
+                str(interaction.guild_id), case_id.strip().upper(), str(interaction.user.id), decision
+            )
+            await self._refresh_case_card(case)
+            await interaction.followup.send(
+                f"⚖️ Vote recorded: **{decision}** on `{case.case_id}`.", ephemeral=True
+            )
+        except AppError as e:
+            await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
+
+    @court.command(name="defend", description="Enter or update your defense (accused only)")
+    @app_commands.describe(case_id="Case ID", statement="Your defense")
+    async def court_defend(self, interaction: discord.Interaction, case_id: str, statement: str):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            case = await self.service.court_defend(
+                str(interaction.guild_id), case_id.strip().upper(), str(interaction.user.id), statement
+            )
+            await self._refresh_case_card(case)
+            await interaction.followup.send("📜 Defense entered.", ephemeral=True)
+        except AppError as e:
+            await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
+
+    @court.command(name="evidence", description="Add evidence (accuser only)")
+    @app_commands.describe(case_id="Case ID", statement="Your evidence")
+    async def court_evidence(self, interaction: discord.Interaction, case_id: str, statement: str):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            case = await self.service.court_evidence(
+                str(interaction.guild_id), case_id.strip().upper(), str(interaction.user.id), statement
+            )
+            await self._refresh_case_card(case)
+            await interaction.followup.send("📜 Evidence added.", ephemeral=True)
+        except AppError as e:
+            await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
+
+    @court.command(name="close", description="[Magistrate] Conclude a case and pass verdict")
+    @app_commands.describe(case_id="Case ID")
+    @app_commands.checks.has_permissions(manage_channels=True)
+    async def court_close(self, interaction: discord.Interaction, case_id: str):
+        await interaction.response.defer()
+        case_id = case_id.strip().upper()
+        case = await self.service.get_case(case_id)
+        if not case:
+            await interaction.followup.send(f"❌ No case `{case_id}`.", ephemeral=True)
+            return
+        if str(interaction.user.id) == case.accused_id:
+            await interaction.followup.send("❌ A magistrate cannot judge their own case.", ephemeral=True)
+            return
+        try:
+            result = await self.service.close_case(str(interaction.guild_id), case_id)
+        except AppError as e:
+            await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
+            return
+        await self._refresh_case_card(result["case"])
+        embed = _verdict_embed(result)
+        if result["sentence"]:
+            embed.description = (embed.description or "") + "\n\nThe sentence carries out once the appeal window closes."
+        await interaction.followup.send(embed=embed)
+        if result["sentence"] and result["sentence"]["case"].round >= 2:
+            await self._post_sentence(interaction.guild, result["sentence"])
+
+    @court.command(name="appeal", description="Appeal a conviction to a fresh vote (once)")
+    @app_commands.describe(case_id="Case ID")
+    async def court_appeal(self, interaction: discord.Interaction, case_id: str):
+        await interaction.response.defer()
+        try:
+            case = await self.service.appeal_case(
+                str(interaction.guild_id), case_id.strip().upper(), str(interaction.user.id)
+            )
+        except AppError as e:
+            await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
+            return
+        await self._refresh_case_card(case)
+        tribunal = await self._tribunal_channel(interaction.guild)
+        if tribunal:
+            try:
+                law = await self._law(case.law_id)
+                msg = await tribunal.send(embed=_case_embed(case, law.title if law else case.law_id, law.fine_amount if law else 0))
+                case.message_id = str(msg.id)
+                case.channel_id = str(tribunal.id)
+                await self.service.repo.save_case(case)
+                await msg.add_reaction(GUILTY_EMOJI)
+                await msg.add_reaction(INNOCENT_EMOJI)
+            except Exception:
+                pass
+        await interaction.followup.send(f"⚖️ **Appeal granted** on `{case.case_id}`. Fresh jury, fresh vote.")
+
+    @court.command(name="case", description="View a case")
+    @app_commands.describe(case_id="Case ID")
+    async def court_case(self, interaction: discord.Interaction, case_id: str):
+        await interaction.response.defer()
+        case = await self.service.get_case(case_id.strip().upper())
+        if not case:
+            await interaction.followup.send(f"❌ No case `{case_id}`.", ephemeral=True)
+            return
+        law = await self._law(case.law_id)
+        await interaction.followup.send(embed=_case_embed(case, law.title if law else case.law_id, law.fine_amount if law else 0))
+
+    @court.command(name="docket", description="List open cases")
+    async def court_docket(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        cases = await self.service.list_open_cases(str(interaction.guild_id))
+        if not cases:
+            await interaction.followup.send("⚖️ The docket is empty.")
+            return
+        embed = discord.Embed(title="⚖️ Open Docket", color=PINK)
+        for case in cases:
+            embed.add_field(
+                name=f"`{case.case_id}` - {case.law_id}",
+                value=f"<@{case.accused_id}> accused by <@{case.accuser_id}> · "
+                      f"{len(case.guilty())} guilty / {len(case.innocent())} innocent",
+                inline=False,
+            )
+        await interaction.followup.send(embed=embed)
+
+    # --- Sentence execution ---
+
+    async def _post_sentence(self, guild, sentence: dict):
+        case = sentence["case"]
+        tribunal = await self._tribunal_channel(guild)
+        if not tribunal:
+            return
+        lines = [f"🔨 **{case.case_id}** - sentence passed on <@{case.accused_id}> under `{case.law_id}` ({sentence['law_title']})."]
+        if sentence["multiplier"] > 1:
+            lines.append(f"Repeat offender: fine ×{sentence['multiplier']}.")
+        if sentence["burned"] > 0:
+            lines.append(f"💰 **{sentence['burned']:,} spi** burned from the convicted.")
+        if sentence["shamed"]:
+            lines.append("🪙 They could not pay - the sentence converts to public shame.")
+            shame = await self._channel(guild, "wall-of-shame")
+            if shame:
+                try:
+                    await shame.send(
+                        f"🚨 **{case.case_id}**: <@{case.accused_id}> was convicted under `{case.law_id}` "
+                        f"but holds no spi to burn. Shame is the sentence."
+                    )
+                except Exception:
+                    pass
+        try:
+            await tribunal.send("\n".join(lines))
+        except Exception:
+            pass
+
+
+def _verdict_embed(result: dict) -> discord.Embed:
+    case = result["case"]
+    verdict = result["verdict"]
+    if verdict == CASE_CONVICTED:
+        title, color = "🔨 CONVICTED", discord.Color.red()
+        note = "Sentence suspended pending appeal (12h) - the convicted may /court appeal once."
+        if case.round >= 2:
+            note = "Appeal denied - the conviction stands."
+    elif verdict == CASE_ACQUITTED:
+        title, color = "🕊️ ACQUITTED", discord.Color.green()
+        note = "The accuser is fined 25 spi for a false charge." if result.get("false_witness") else "Acquitted."
+    else:
+        title, color = "⌛ LAPSED", discord.Color.dark_grey()
+        note = "No quorum - fewer than 3 jurors voted. The accused walks."
+    embed = discord.Embed(
+        title=f"⚖️ {title} - {case.case_id}",
+        description=f"{note}\n🔨 {len(case.guilty())} guilty · 🕊️ {len(case.innocent())} innocent",
+        color=color,
+    )
+    return embed
