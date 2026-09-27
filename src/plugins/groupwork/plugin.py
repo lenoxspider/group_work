@@ -43,6 +43,11 @@ from src.interface.cogs.move_command_cog import MoveCommandCog
 from src.interface.cogs.cleanup_cog import CleanupCog
 
 
+BOUNTY_ASSIGNMENT = 50
+BOUNTY_VERIFICATION = 10
+FINE_OVERDUE = 25
+
+
 class GroupworkPlugin(Plugin):
     name = "groupwork"
     schema = GROUPWORK_SCHEMA
@@ -87,7 +92,13 @@ class GroupworkPlugin(Plugin):
         self.file_vault = LocalFileVault(settings.uploads_dir)
 
         # Services
-        self.task_service = TaskService(self.task_repo, self.activity_repo)
+        self.task_service = TaskService(
+            self.task_repo,
+            self.activity_repo,
+            bounty_assignment=BOUNTY_ASSIGNMENT,
+            bounty_verification=BOUNTY_VERIFICATION,
+            fine_overdue=FINE_OVERDUE,
+        )
         self.deadline_service = DeadlineService(self.deadline_repo)
         self.activity_service = ActivityService(self.activity_repo, self.task_repo)
         self.vault_service = VaultService(self.file_vault, self.activity_repo)
@@ -105,6 +116,12 @@ class GroupworkPlugin(Plugin):
             self.deadline_repo,
             self.activity_repo,
         )
+
+    def wire(self, registry) -> None:
+        """Inject the bank's ledger into the task service for work-to-earn rewards."""
+        bank_plugin = registry.get("bank")
+        if bank_plugin:
+            self.task_service.attach_ledger(bank_plugin.service)
 
     def build_cogs(self, bot) -> list:
         cogs = [

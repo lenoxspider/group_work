@@ -24,13 +24,42 @@ from src.application.dtos.task_dtos import (
     TaskReminderActionDTO,
     OverdueShameActionDTO
 )
+from src.application.interfaces.ledger import Ledger
 
 class TaskService:
     """Orchestrates task assignments, completions, and reminders."""
 
-    def __init__(self, task_repo: TaskRepository, activity_repo: ActivityRepository):
+    def __init__(
+        self,
+        task_repo: TaskRepository,
+        activity_repo: ActivityRepository,
+        ledger: Optional[Ledger] = None,
+        bounty_assignment: int = 0,
+        bounty_verification: int = 0,
+        fine_overdue: int = 0
+    ):
         self._task_repo = task_repo
         self._activity_repo = activity_repo
+        self._ledger = ledger
+        self._bounty_assignment = bounty_assignment
+        self._bounty_verification = bounty_verification
+        self._fine_overdue = fine_overdue
+
+    async def _reward_assignment(self, guild_id: str, user_id: str) -> None:
+        if self._ledger and self._bounty_assignment:
+            await self._ledger.grant(guild_id, user_id, self._bounty_assignment, "task completed")
+
+    async def _reward_verification(self, guild_id: str, user_id: str) -> None:
+        if self._ledger and self._bounty_verification:
+            await self._ledger.grant(guild_id, user_id, self._bounty_verification, "buddy verification")
+
+    async def _penalize_overdue(self, guild_id: str, user_id: str, task_id: str) -> None:
+        if self._ledger and self._fine_overdue:
+            await self._ledger.burn(guild_id, user_id, self._fine_overdue, f"overdue task {task_id}")
+
+    def attach_ledger(self, ledger: Optional[Ledger]) -> None:
+        """Inject the economy ledger after cross-plugin wiring (called from the groupwork plugin)."""
+        self._ledger = ledger
 
     def _generate_task_id(self) -> str:
         return f"TASK-{uuid.uuid4().hex[:6].upper()}"
@@ -97,6 +126,7 @@ class TaskService:
         # If no buddy verification required, award activity score & streak immediately
         if not task.verifier_id:
             await self._activity_repo.record_task_completed(task.guild_id, task.assigned_to, is_on_time=is_on_time)
+            await self._reward_assignment(task.guild_id, task.assigned_to)
         return self._map_to_dto(task)
 
     async def verify_task(self, task_id: str, verifier_user_id: str) -> TaskResultDTO:
@@ -113,6 +143,9 @@ class TaskService:
         await self._activity_repo.record_task_completed(task.guild_id, task.assigned_to, is_on_time=is_on_time)
         # Award buddy verification bonus to the verifier
         await self._activity_repo.record_file_submission(task.guild_id, verifier_user_id)
+        # Economy: pay the assignee and tip the verifier
+        await self._reward_assignment(task.guild_id, task.assigned_to)
+        await self._reward_verification(task.guild_id, verifier_user_id)
         return self._map_to_dto(task)
 
     async def toggle_in_progress(self, task_id: str) -> TaskResultDTO:
@@ -145,8 +178,12 @@ class TaskService:
         return actions
 
     async def acknowledge_shame(self, task_id: str) -> None:
-        """Marks task as logged to Wall of Shame."""
+        """Marks task as logged to Wall of Shame and charges the overdue fine."""
+        task = await self._task_repo.get_by_id(task_id)
+        if not task:
+            return
         await self._task_repo.mark_shame_logged(task_id)
+        await self._penalize_overdue(task.guild_id, task.assigned_to, task_id)
 
     async def get_pending_tasks(self, guild_id: str, member_id: Optional[str] = None) -> List[TaskResultDTO]:
         """Lists pending tasks for a guild, optionally filtered by member."""
