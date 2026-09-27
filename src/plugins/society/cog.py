@@ -8,6 +8,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from src.interface.discord_formatters import COLOR_PRIMARY, COLOR_SUCCESS
+from src.plugins.community.checks import requires_citizen
 from src.plugins.society.domain import SocietyError
 from src.plugins.society.service import SocietyService
 
@@ -118,6 +119,7 @@ class SocietyCog(commands.Cog, name="Society"):
 
     @society.command(name="propose", description="Submit a proposal for democratic vote")
     @app_commands.describe(title="Proposal title", amount="spi requested from the treasury (0 for non-spending)", description="What and why")
+    @requires_citizen()
     async def propose(self, interaction: discord.Interaction, title: str, description: str, amount: int = 0):
         await interaction.response.defer()
         proposal = await self.service.propose(str(interaction.guild_id), str(interaction.user.id), title, description, amount)
@@ -129,6 +131,7 @@ class SocietyCog(commands.Cog, name="Society"):
 
     @society.command(name="vote", description="Vote on an open proposal")
     @app_commands.describe(proposal_id="Proposal ID", decision="Your vote")
+    @requires_citizen()
     async def vote(self, interaction: discord.Interaction, proposal_id: str, decision: Literal["yes", "no"]):
         await interaction.response.defer()
         try:

@@ -9,6 +9,7 @@ from discord.ext import commands
 
 from src.plugins.radio.domain import NoActivePlayer, RadioError
 from src.plugins.radio.service import RadioService
+from src.plugins.community.checks import requires_citizen
 from src.interface.discord_formatters import COLOR_PRIMARY
 
 logger = logging.getLogger("plugins.radio.cog")
@@ -29,8 +30,9 @@ class RadioCog(commands.Cog, name="Radio"):
 
     radio = app_commands.Group(name="radio", description="Radio station controls")
 
-    @radio.command(name="play", description="Queue a YouTube link or search query")
-    @app_commands.describe(query="YouTube URL or search term")
+    @radio.command(name="play", description="Queue a SoundCloud link or search query")
+    @app_commands.describe(query="SoundCloud URL or search term")
+    @requires_citizen()
     async def play(self, interaction: discord.Interaction, query: str):
         member = interaction.user
         voice = getattr(member, "voice", None)

@@ -20,6 +20,7 @@ from src.plugins.games.formatters import (
 from src.plugins.games.move_view import MoveView
 from src.plugins.games.runner import RedLightRunner
 from src.plugins.games.service import ArenaService
+from src.plugins.community.checks import requires_citizen
 
 logger = logging.getLogger("plugins.games.cog")
 
@@ -96,6 +97,7 @@ class GamesCog(commands.GroupCog, group_name="event"):
             await interaction.followup.send(f"{e.message}", ephemeral=True)
 
     @app_commands.command(name="join", description="Pay the entry fee and claim a player number")
+    @requires_citizen()
     async def join(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True)
@@ -166,6 +168,7 @@ class GamesCog(commands.GroupCog, group_name="event"):
 
     @app_commands.command(name="vote", description="Vote to continue or stop the games")
     @app_commands.describe(choice="continue to the next round, or stop and split the pot")
+    @requires_citizen()
     async def vote(self, interaction: discord.Interaction, choice: Literal["continue", "stop"]):
         try:
             await interaction.response.defer(ephemeral=True)
@@ -213,6 +216,7 @@ class MoveCog(commands.Cog, name="Movement"):
 
     @app_commands.command(name="move", description="Take steps in Red Light Green Light (safe only during Green Light!)")
     @app_commands.checks.cooldown(1, 0.5, key=lambda i: (i.guild_id, i.user.id))
+    @requires_citizen()
     async def move(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True)

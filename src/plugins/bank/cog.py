@@ -6,6 +6,7 @@ from discord.ext import commands
 
 from src.plugins.bank.domain import InsufficientFunds, InvalidAmount, SelfTransfer, SINK, TREASURY
 from src.plugins.bank.service import BankService
+from src.plugins.community.checks import requires_citizen
 
 
 def _label(user_id: str, bot: commands.Bot) -> str:
@@ -37,6 +38,7 @@ class BankCog(commands.Cog):
 
     @bank.command(name="give", description="Send spi to another member")
     @app_commands.describe(member="Recipient", amount="Amount of spi", reason="Optional note")
+    @requires_citizen()
     async def give(
         self,
         interaction: discord.Interaction,

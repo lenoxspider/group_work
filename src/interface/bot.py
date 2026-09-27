@@ -102,6 +102,15 @@ class GroupAccountabilityBot(commands.Bot):
             if isinstance(orig_error, discord.NotFound):
                 logger.warning("Discord interaction %s expired before response could be sent.", interaction.id)
                 return
+            if isinstance(orig_error, app_commands.CheckFailure):
+                try:
+                    if interaction.response.is_done():
+                        await interaction.followup.send(str(orig_error), ephemeral=True)
+                    else:
+                        await interaction.response.send_message(str(orig_error), ephemeral=True)
+                except Exception:
+                    pass
+                return
             logger.error("Unhandled slash command error: %s", error, exc_info=orig_error)
 
         # Sync Slash Commands

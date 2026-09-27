@@ -19,6 +19,7 @@ from src.application.services.activity_service import ActivityService
 from src.application.services.vault_service import VaultService
 from src.interface.channel_router import ChannelRouter
 from src.domain.errors import AppError
+from src.plugins.community.checks import requires_citizen
 from src.interface.discord_formatters import build_vault_receipt_embed
 
 logger = logging.getLogger("interface.cogs.tracker")
@@ -62,6 +63,7 @@ class TrackerCog(commands.Cog, name="Activity Tracker"):
         file="The deliverable file to submit (e.g. PDF, docx, code, zip)",
         notes="Optional notes or description regarding this submission"
     )
+    @requires_citizen()
     async def submit_deliverable(
         self,
         interaction: discord.Interaction,

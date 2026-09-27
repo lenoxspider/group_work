@@ -26,6 +26,7 @@ from src.application.services.extension_service import ExtensionService
 from src.application.services.preference_service import PreferenceService
 from src.application.services.voice_service import VoiceService
 from src.domain.errors import AppError
+from src.plugins.community.checks import requires_citizen
 from src.interface.cogs.task_buttons import TaskActionView
 from src.interface.channel_router import ChannelRouter
 from src.interface.cogs.task_buttons import TaskActionView
@@ -94,6 +95,7 @@ class TasksCog(commands.Cog, name="Task Ledger"):
         due="Due date (YYYY-MM-DD or YYYY-MM-DD HH:MM)",
         verifier="Optional: accountability buddy who signs off on completion"
     )
+    @requires_citizen()
     async def add_task(
         self,
         interaction: discord.Interaction,
@@ -151,6 +153,7 @@ class TasksCog(commands.Cog, name="Task Ledger"):
 
     @task_group.command(name="complete", description="Mark an assigned task as completed")
     @app_commands.describe(task_id="The ID of the task to complete (e.g. TASK-A1B2)")
+    @requires_citizen()
     async def complete_task(self, interaction: discord.Interaction, task_id: str):
         await interaction.response.defer()
         try:
@@ -194,6 +197,7 @@ class TasksCog(commands.Cog, name="Task Ledger"):
 
     @task_group.command(name="verify", description="Sign off on a submitted deliverable as accountability buddy")
     @app_commands.describe(task_id="The ID of the task to verify (e.g. TASK-A1B2)")
+    @requires_citizen()
     async def verify_task(self, interaction: discord.Interaction, task_id: str):
         await interaction.response.defer()
         try:
@@ -224,6 +228,7 @@ class TasksCog(commands.Cog, name="Task Ledger"):
         new_due="Proposed new due date (YYYY-MM-DD or YYYY-MM-DD HH:MM)",
         reason="Explanation of why an extension is necessary"
     )
+    @requires_citizen()
     async def extend_task(
         self,
         interaction: discord.Interaction,
