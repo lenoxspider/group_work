@@ -21,6 +21,9 @@ class Plugin:
     """Base contract every feature module implements."""
 
     name: str = "unnamed"
+    title: str = ""
+    summary: str = ""
+    guide: List[tuple] = []
     schema: List[str] = []
     migrations: List[tuple] = []
     channels: List[object] = []

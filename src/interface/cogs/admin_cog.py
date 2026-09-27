@@ -193,57 +193,18 @@ class AdminCog(commands.Cog, name="Administration"):
         except AppError as e:
             await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
 
-    @app_commands.command(name="guide", description="View bot command cheat sheet and group collaboration guide")
+    @app_commands.command(name="guide", description="View the full command reference for the server")
     async def guide(self, interaction: discord.Interaction):
         embed = discord.Embed(
-            title="📖 Group Accountability Bot Guide",
-            description="Designed to eliminate free-riding and maintain transparent collaboration in student teams.",
+            title="📖 Server Guide",
+            description="A self-governing server: work pays spi, the bank moves it, the radio plays it, and the society rules it.",
             color=COLOR_PRIMARY
         )
-        embed.add_field(
-            name="1. 📋 Task Ledger & Interactive Buttons",
-            value=(
-                "`/task add <desc> <@member> <YYYY-MM-DD>` — Assign deliverable task\n"
-                "`/task complete <TASK-ID>` — Mark completed\n"
-                "`/task list` — View pending tasks\n"
-                "• **Task Cards** include 🔔 **Nudge**, 🔄 **In Progress**, and ✅ **Complete** buttons!"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="2. 🚨 Wall of Shame & On-Time Streaks",
-            value=(
-                "• Missing deadlines automatically posts overdue alerts to `#wall-of-shame`.\n"
-                "• Overdue tasks break your consecutive on-time streak (`🔥 0`)!\n"
-                "• Complete on time to rank up: Comrade → Sergeant → Colonel → Marshal → General Secretary."
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="3. 🎯 Deadlines & Alerts",
-            value=(
-                "`/deadline add <name> <YYYY-MM-DD HH:MM>` — Pin live countdown in `#deadlines`\n"
-                "`/deadline list` — View active milestones\n"
-                "`/deadline complete <DL-ID>` — Archive finished deadline"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="4. 📊 Anti-Free-Riding Reports & Submissions",
-            value=(
-                "`/submit file:<attachment> [notes:<text>]` — Upload deliverable with hash verification\n"
-                "`/report` — View team ranking with on-time streaks and military ranks\n"
-                "`/report <@member>` — View individual scorecard and deliverable history"
-            ),
-            inline=False
-        )
-        embed.add_field(
-            name="5. 🚀 Project Lifecycle",
-            value=(
-                "`/project status` — View overall project completion and upcoming milestones\n"
-                "`/project finish` — Archive project sprint and generate final retrospective report"
-            ),
-            inline=False
-        )
-        embed.set_footer(text="Automated alerts: T-24h & T-1h for tasks; T-72h, T-24h & T-6h for milestones.")
+        for plugin in self.bot.plugins.values():
+            if not plugin.guide:
+                continue
+            lines = [f"`{cmd}` - {desc}" for cmd, desc in plugin.guide]
+            value = plugin.summary + "\n" + "\n".join(lines)
+            embed.add_field(name=plugin.title or plugin.name, value=value, inline=False)
+        embed.set_footer(text="Type / to browse commands. Run /setup to provision channels and roles.")
         await interaction.response.send_message(embed=embed)

@@ -50,6 +50,19 @@ FINE_OVERDUE = 25
 
 class GroupworkPlugin(Plugin):
     name = "groupwork"
+    title = "📋 Work & Accountability"
+    summary = "Tasks pay spi, overdue tasks are fined, and Squid Game keeps it lively."
+    guide = [
+        ("/task add <desc> <@member> <due>", "Assign a task (optional verifier buddy)"),
+        ("/task complete · verify · extend · list", "Deliverables, voting, and extensions"),
+        ("/deadline add · list · complete", "Milestone countdowns with team alerts"),
+        ("/report [@member]", "Leaderboard, military ranks, and scorecards"),
+        ("/submit <file>", "Deliverable vault with SHA-256 verification"),
+        ("/timezone set · quiet · view", "IANA timezone and quiet hours"),
+        ("/project status · finish", "Sprint health dashboard and archive"),
+        ("/squid join · /move", "Squid Game arena and red light green light"),
+        ("/setup", "Provision channels, roles, and permissions"),
+    ]
     schema = GROUPWORK_SCHEMA
     migrations = GROUPWORK_MIGRATIONS
 

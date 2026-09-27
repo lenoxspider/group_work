@@ -9,6 +9,14 @@ from src.plugins.bank.service import BankService
 
 class BankPlugin(Plugin):
     name = "bank"
+    title = "🏦 Bank & spi Economy"
+    summary = "The ledger. spi is minted, transferred, taxed, and burned here."
+    guide = [
+        ("/bank balance", "Check a member's spi balance"),
+        ("/bank give <@member> <amount>", "Send spi (minus transfer tax)"),
+        ("/bank ledger", "Your recent transactions"),
+        ("/bank grant · burn", "[Admin] Mint from the treasury, or burn from circulation"),
+    ]
     schema = BANK_SCHEMA
 
     def __init__(self, bot):

@@ -10,6 +10,15 @@ from src.interface.channel_manager import ChannelDecl
 
 class SocietyPlugin(Plugin):
     name = "society"
+    title = "🏛️ Society & Governance"
+    summary = "Laws, citizenship tiers, the treasury, and democratic spending."
+    guide = [
+        ("/law add · list · show · remove", "The constitution, each law with an optional fine"),
+        ("/society status", "Your citizenship tier and spi balance"),
+        ("/society treasury", "Net minted supply in circulation"),
+        ("/society propose · vote · conclude", "Democratic treasury spending proposals"),
+        ("/society tax · set_tax rate", "View or set the transfer tax rate"),
+    ]
     schema = SOCIETY_SCHEMA
     migrations = []
 
