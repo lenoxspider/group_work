@@ -1,6 +1,9 @@
 # Environment secrets
 .env
 
+# Python virtual environment
+.venv/
+
 # SQLite Database
 *.sqlite
 *.sqlite3

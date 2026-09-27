@@ -13,7 +13,9 @@ from src.plugins.base import Plugin
 def get_plugins(bot) -> list[Plugin]:
     """Instantiate and return every plugin in load order."""
     from src.plugins.bank.plugin import BankPlugin
+    from src.plugins.groupwork.plugin import GroupworkPlugin
 
     return [
+        GroupworkPlugin(bot),
         BankPlugin(bot),
     ]

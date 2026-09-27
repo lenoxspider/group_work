@@ -2,10 +2,12 @@
 Discord Bot client composition root.
 
 What it does:
-- Bootstraps and injects domain repositories, application services, and Cogs.
-- Synchronizes slash application commands with Discord Gateway.
+- Owns shared infrastructure only: database manager, TTS engine, audio deliverer.
+- Loads feature plugins (bank, groupwork, ...), each of which self-registers
+  its schema, services, and cogs.
 
 What it does NOT do:
+- Does NOT hardcode any feature's repositories, services, or cogs.
 - Does NOT execute business logic or database queries directly.
 """
 
@@ -16,48 +18,16 @@ from discord.ext import commands
 
 from src.config.settings import Settings
 from src.infrastructure.database.connection import DatabaseManager
-from src.infrastructure.database.task_sqlite_repo import SQLiteTaskRepository
-from src.infrastructure.database.deadline_sqlite_repo import SQLiteDeadlineRepository
-from src.infrastructure.database.activity_sqlite_repo import SQLiteActivityRepository
-from src.infrastructure.database.project_sqlite_repo import SQLiteProjectRepository
-from src.infrastructure.database.extension_sqlite_repo import SQLiteExtensionRepository
-from src.infrastructure.database.preference_sqlite_repo import SQLitePreferenceRepository
-from src.infrastructure.database.squid_sqlite_repo import SquidSqliteRepository
-from src.infrastructure.database.channel_binding_sqlite_repo import SQLiteChannelBindingRepository
-from src.infrastructure.database.alert_fire_sqlite_repo import SQLiteAlertFireRepository
-from src.infrastructure.storage.local_file_vault import LocalFileVault
 from src.infrastructure.speech.espeak_synthesizer import EspeakSpeechSynthesizer
 from src.infrastructure.speech.attachment_deliverer import AttachmentAudioDeliverer
 
-from src.application.services.task_service import TaskService
-from src.application.services.deadline_service import DeadlineService
-from src.application.services.activity_service import ActivityService
-from src.application.services.vault_service import VaultService
-from src.application.services.project_service import ProjectService
-from src.application.services.extension_service import ExtensionService
-from src.application.services.preference_service import PreferenceService
-from src.application.services.voice_service import VoiceService
-from src.application.services.squid_service import SquidService
-from src.interface.channel_router import ChannelRouter
-
 from src.plugins import get_plugins
-
-from src.interface.cogs.tasks_cog import TasksCog
-from src.interface.cogs.task_reminder_cog import TaskReminderCog
-from src.interface.cogs.deadlines_cog import DeadlinesCog
-from src.interface.cogs.reports_cog import ReportsCog
-from src.interface.cogs.tracker_cog import TrackerCog
-from src.interface.cogs.admin_cog import AdminCog
-from src.interface.cogs.preference_cog import PreferenceCog
-from src.interface.cogs.voice_cog import VoiceCog
-from src.interface.cogs.squid_cog import SquidCog
-from src.interface.cogs.move_command_cog import MoveCommandCog
-from src.interface.cogs.cleanup_cog import CleanupCog
 
 logger = logging.getLogger("interface.bot")
 
+
 class GroupAccountabilityBot(commands.Bot):
-    """Composition root bot for Group Accountability."""
+    """Composition root: shared core + plugin runtime."""
 
     def __init__(self, settings: Settings):
         intents = discord.Intents.default()
@@ -68,96 +38,42 @@ class GroupAccountabilityBot(commands.Bot):
         super().__init__(
             command_prefix="!",
             intents=intents,
-            help_command=None
+            help_command=None,
         )
         self.settings = settings
 
-        # Infrastructure Adapters
+        # Shared core infrastructure
         self.db_manager = DatabaseManager(settings.database_path)
+        self.speech_synthesizer = (
+            EspeakSpeechSynthesizer(settings.tts_binary) if settings.tts_enabled else None
+        )
+        self.audio_deliverer = AttachmentAudioDeliverer() if settings.tts_enabled else None
 
-        # Plugin runtime: every feature (bank, radio, society) self-registers
+        # Plugin runtime: every feature self-registers schema, services, and cogs
         self.plugins = {}
         self._plugin_defs = get_plugins(self)
         for plugin in self._plugin_defs:
             self.plugins[plugin.name] = plugin
             self.db_manager.register_plugin_schema(plugin.name, plugin.schema)
-        self.task_repo = SQLiteTaskRepository(settings.database_path)
-        self.deadline_repo = SQLiteDeadlineRepository(settings.database_path)
-        self.activity_repo = SQLiteActivityRepository(settings.database_path)
-        self.project_repo = SQLiteProjectRepository(settings.database_path)
-        self.extension_repo = SQLiteExtensionRepository(settings.database_path)
-        self.preference_repo = SQLitePreferenceRepository(settings.database_path)
-        self.squid_repo = SquidSqliteRepository(settings.database_path)
-        self.channel_binding_repo = SQLiteChannelBindingRepository(settings.database_path)
-        self.alert_fire_repo = SQLiteAlertFireRepository(settings.database_path)
-        self.file_vault = LocalFileVault(settings.uploads_dir)
-
-        # Routers & Application Services
-        self.channel_router = ChannelRouter(self, self.channel_binding_repo)
-        self.task_service = TaskService(self.task_repo, self.activity_repo)
-        self.deadline_service = DeadlineService(self.deadline_repo)
-        self.activity_service = ActivityService(self.activity_repo, self.task_repo)
-        self.vault_service = VaultService(self.file_vault, self.activity_repo)
-        self.extension_service = ExtensionService(self.extension_repo, self.task_repo)
-        self.preference_service = PreferenceService(self.preference_repo)
-        self.speech_synthesizer = EspeakSpeechSynthesizer(settings.tts_binary) if settings.tts_enabled else None
-        self.audio_deliverer = AttachmentAudioDeliverer() if settings.tts_enabled else None
-        self.voice_service = (
-            VoiceService(self.speech_synthesizer, settings.tts_voice_default)
-            if self.speech_synthesizer
-            else None
-        )
-        self.squid_service = SquidService(self.squid_repo, self.speech_synthesizer)
-        self.project_service = ProjectService(
-            self.project_repo,
-            self.task_repo,
-            self.deadline_repo,
-            self.activity_repo
-        )
+            self.db_manager.register_plugin_migrations(plugin.name, plugin.migrations)
 
     async def setup_hook(self) -> None:
-        """Initializes database schema and mounts all dependency-injected cogs."""
         logger.info("Initializing database schema...")
         await self.db_manager.initialize_schema()
 
-        # Mount plugin cogs (bank, radio, society, ...)
+        # Resolve cross-plugin references before mounting
+        for plugin in self._plugin_defs:
+            plugin.wire(self.plugins)
+
+        # Mount every plugin's cogs
         for plugin in self._plugin_defs:
             for cog in plugin.build_cogs(self):
                 await self.add_cog(cog)
             logger.info("Plugin mounted: %s", plugin.name)
 
-        # Mount Cogs with injected services
-        await self.add_cog(TasksCog(
-            self, self.task_service, self.extension_service, self.channel_router, self.preference_service, self.voice_service
-        ))
-        await self.add_cog(TaskReminderCog(
-            self, self.task_service, self.channel_router, self.alert_fire_repo, self.preference_service, self.voice_service, self.squid_service
-        ))
-        await self.add_cog(DeadlinesCog(self, self.deadline_service, self.channel_router, self.voice_service))
-        await self.add_cog(ReportsCog(self, self.activity_service, self.voice_service))
-        await self.add_cog(TrackerCog(self, self.activity_service, self.vault_service, self.channel_router))
-        await self.add_cog(AdminCog(self, self.project_service, self.channel_router))
-        await self.add_cog(PreferenceCog(self, self.preference_service))
-        await self.add_cog(CleanupCog(self, self.channel_router))
-        if self.voice_service and self.audio_deliverer:
-            await self.add_cog(VoiceCog(self, self.voice_service, self.audio_deliverer))
-        if self.audio_deliverer:
-            await self.add_cog(SquidCog(
-                self, self.squid_service, self.audio_deliverer, self.speech_synthesizer, self.channel_router
-            ))
-            await self.add_cog(MoveCommandCog(
-                self, self.squid_service, self.audio_deliverer, self.channel_router
-            ))
-        logger.info("All Cogs mounted successfully.")
-
-        # Re-sync and cleanup game session state on startup
-        self.squid_service.reset_all_games()
-        if self.speech_synthesizer:
-            try:
-                await self.squid_service.preload_audio_cache()
-                logger.info("Squid Game voice audio cache preloaded successfully.")
-            except Exception as e:
-                logger.warning("Could not pre-synthesize Squid Game audio cache: %s", e)
+        # Post-mount async hooks (caches, state resets)
+        for plugin in self._plugin_defs:
+            await plugin.on_setup(self)
 
         # Register Global Tree Error Handler
         @self.tree.error
