@@ -66,6 +66,10 @@ if ! id "$RUN_USER" >/dev/null 2>&1; then
 fi
 
 # --- 3. Clone or update the repository ------------------------------------
+# The install dir is owned by the service user, so allow git (run as root) to
+# operate on it. Harmless when re-run.
+git config --global --add safe.directory "$INSTALL_DIR" >/dev/null 2>&1 || true
+
 if [[ -d "$INSTALL_DIR/.git" ]]; then
   log "Repository exists — pulling latest..."
   git -C "$INSTALL_DIR" fetch origin
