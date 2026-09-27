@@ -32,10 +32,16 @@ class SourceResolver:
             "retries": 3,
             "extractor_retries": 3,
         }
-        # YouTube bot-checks datacenter IPs; log-in cookies bypass it.
+        # YouTube bot-checks datacenter IPs; log-in cookies bypass the check.
         cookies = os.getenv("YTDLP_COOKIES", "").strip()
         if cookies and os.path.exists(cookies):
             opts["cookiefile"] = cookies
+        # bgutil PO token provider - needed to unlock audio stream formats.
+        pot_home = os.getenv("YTDLP_POT_SERVER_HOME", "").strip()
+        if pot_home and os.path.exists(os.path.join(pot_home, "build", "generate_once.js")):
+            opts["extractor_args"] = {
+                "youtubepot-bgutilscript": {"server_home": pot_home},
+            }
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(query, download=False)
 
