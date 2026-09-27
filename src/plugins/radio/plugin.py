@@ -10,7 +10,7 @@ from src.interface.channel_manager import ChannelDecl
 class RadioPlugin(Plugin):
     name = "radio"
     title = "📻 Radio Station"
-    summary = "YouTube audio streamed straight into a voice channel."
+    summary = "SoundCloud audio streamed straight into a voice channel."
     guide = [
         ("/radio play <url|search>", "Queue a track in your voice channel"),
         ("/radio skip · stop", "Skip the current track, or disconnect"),

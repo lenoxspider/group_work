@@ -1,4 +1,4 @@
-"""Source resolver - turns a YouTube URL or search query into a streamable Track."""
+"""Source resolver - turns a SoundCloud URL or search query into a streamable Track."""
 
 import asyncio
 import logging
@@ -15,7 +15,7 @@ class SourceResolver:
     def _normalize_query(self, query: str) -> str:
         if re.match(r"https?://", query):
             return query
-        return f"ytsearch1:{query}"
+        return f"scsearch1:{query}"
 
     def _extract(self, query: str) -> dict:
         import os
