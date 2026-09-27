@@ -20,6 +20,11 @@ class DatabaseManager:
 
     def __init__(self, db_path: str):
         self.db_path = db_path
+        self._plugin_schemas = {}
+
+    def register_plugin_schema(self, plugin_name: str, ddl_list) -> None:
+        """Register a plugin's DDL to be applied during schema init."""
+        self._plugin_schemas[plugin_name] = ddl_list
 
     async def initialize_schema(self) -> None:
         """Initializes all required tables and indexes."""
@@ -206,6 +211,12 @@ class DatabaseManager:
                     await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
                 except Exception:
                     pass
+
+            # Apply plugin-registered schemas (bank, radio, society, etc.)
+            for plugin_name, ddl_list in self._plugin_schemas.items():
+                for ddl in ddl_list:
+                    await db.execute(ddl)
+                logger.info("Plugin schema applied: %s", plugin_name)
 
             await db.commit()
             logger.info("SQLite schema initialized successfully at %s", self.db_path)

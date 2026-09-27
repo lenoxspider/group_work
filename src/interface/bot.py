@@ -40,6 +40,8 @@ from src.application.services.voice_service import VoiceService
 from src.application.services.squid_service import SquidService
 from src.interface.channel_router import ChannelRouter
 
+from src.plugins import get_plugins
+
 from src.interface.cogs.tasks_cog import TasksCog
 from src.interface.cogs.task_reminder_cog import TaskReminderCog
 from src.interface.cogs.deadlines_cog import DeadlinesCog
@@ -72,6 +74,13 @@ class GroupAccountabilityBot(commands.Bot):
 
         # Infrastructure Adapters
         self.db_manager = DatabaseManager(settings.database_path)
+
+        # Plugin runtime: every feature (bank, radio, society) self-registers
+        self.plugins = {}
+        self._plugin_defs = get_plugins(self)
+        for plugin in self._plugin_defs:
+            self.plugins[plugin.name] = plugin
+            self.db_manager.register_plugin_schema(plugin.name, plugin.schema)
         self.task_repo = SQLiteTaskRepository(settings.database_path)
         self.deadline_repo = SQLiteDeadlineRepository(settings.database_path)
         self.activity_repo = SQLiteActivityRepository(settings.database_path)
@@ -110,6 +119,12 @@ class GroupAccountabilityBot(commands.Bot):
         """Initializes database schema and mounts all dependency-injected cogs."""
         logger.info("Initializing database schema...")
         await self.db_manager.initialize_schema()
+
+        # Mount plugin cogs (bank, radio, society, ...)
+        for plugin in self._plugin_defs:
+            for cog in plugin.build_cogs(self):
+                await self.add_cog(cog)
+            logger.info("Plugin mounted: %s", plugin.name)
 
         # Mount Cogs with injected services
         await self.add_cog(TasksCog(
