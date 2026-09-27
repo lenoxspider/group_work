@@ -102,34 +102,6 @@ GROUPWORK_SCHEMA = [
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS squid_players (
-        guild_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        player_number TEXT NOT NULL,
-        is_alive INTEGER DEFAULT 1,
-        survival_streak INTEGER DEFAULT 0,
-        elimination_reason TEXT,
-        eliminated_at TEXT,
-        PRIMARY KEY (guild_id, user_id)
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS squid_seasons (
-        guild_id TEXT PRIMARY KEY,
-        pot_amount INTEGER DEFAULT 0,
-        is_active INTEGER DEFAULT 1,
-        current_game TEXT DEFAULT 'Red Light Green Light'
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS movement_anomalies (
-        guild_id TEXT NOT NULL,
-        user_id TEXT NOT NULL,
-        occurred_at TEXT NOT NULL,
-        reason TEXT NOT NULL
-    )
-    """,
-    """
     CREATE TABLE IF NOT EXISTS alert_fires (
         task_id INTEGER NOT NULL,
         alert_tier TEXT NOT NULL,

@@ -4,7 +4,6 @@ Task background reminder and shaming loop Cog.
 What it does:
 - Runs automated 2-minute periodic checks for escalating T-24h, T-6h, and T-1h reminders.
 - Posts overdue tasks to #wall-of-shame with optional voice alerts.
-- Integrates with Squid Game engine to eliminate enrolled players with terminal overdue tasks.
 
 What it does NOT do:
 - Does NOT execute slash commands directly.
@@ -21,7 +20,6 @@ from discord.ext import commands, tasks
 from src.application.services.task_service import TaskService
 from src.application.services.preference_service import PreferenceService
 from src.application.services.voice_service import VoiceService
-from src.application.services.squid_service import SquidService
 from src.application.dtos.voice_dtos import SynthesizeRequestDTO
 from src.interface.discord_formatters import (
     build_wall_of_shame_embed,
@@ -32,12 +30,11 @@ from src.interface.discord_formatters import (
 from src.interface.channel_router import ChannelRouter
 from src.domain.interfaces.alert_fire_repository import AlertFireRepository
 from src.domain.entities.alert_fire import AlertFire
-from src.interface.squid_formatters import build_squid_elimination_embed
 
 logger = logging.getLogger("interface.cogs.task_reminders")
 
 class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
-    """Background loop manager for task notifications, escalation, and Squid Game elimination."""
+    """Background loop manager for task notifications, escalation, and the Wall of Shame."""
 
     def __init__(
         self,
@@ -46,8 +43,7 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
         channel_router: ChannelRouter,
         alert_fire_repo: AlertFireRepository,
         preference_service: Optional[PreferenceService] = None,
-        voice_service: Optional[VoiceService] = None,
-        squid_service: Optional[SquidService] = None
+        voice_service: Optional[VoiceService] = None
     ):
         self.bot = bot
         self.service = task_service
@@ -55,7 +51,6 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
         self.alert_fire_repo = alert_fire_repo
         self.preference_service = preference_service
         self.voice_service = voice_service
-        self.squid_service = squid_service
         self.reminder_loop.start()
 
     def cog_unload(self):
@@ -72,7 +67,7 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
             return None
 
     async def _dispatch_wall_of_shame(self, now: datetime):
-        """Finds overdue tasks and posts shaming notices to #wall-of-shame and checks Squid Game elimination."""
+        """Finds overdue tasks and posts shaming notices to #wall-of-shame."""
         try:
             actions = await self.service.evaluate_overdue_tasks(now)
             for act in actions:
@@ -104,42 +99,6 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
                         )
                     except Exception as e:
                         logger.warning("Could not post to #wall-of-shame in guild %s: %s", guild.id, e)
-
-                # Squid Game Integration: eliminate enrolled player on overdue task
-                if self.squid_service:
-                    player = await self.squid_service.get_player(act.guild_id, act.user_id)
-                    if player and player.is_alive:
-                        elim = await self.squid_service.eliminate_player(
-                            act.guild_id,
-                            act.user_id,
-                            reason=f"Task {act.task_id} overdue by {act.hours_overdue}h"
-                        )
-                        # Atomic role swap to Spectator
-                        try:
-                            member = guild.get_member(int(act.user_id))
-                            if member:
-                                p_role = discord.utils.get(guild.roles, name="Player")
-                                s_role = discord.utils.get(guild.roles, name="Spectator")
-                                if p_role and p_role in member.roles:
-                                    await member.remove_roles(p_role, reason="Eliminated for overdue task")
-                                if s_role and s_role not in member.roles:
-                                    await member.add_roles(s_role, reason="Moved to Spectator deck")
-                        except Exception as e:
-                            logger.warning("Could not swap role on overdue elimination: %s", e)
-
-                        game_hub = await self.channel_router.get(guild, "game-hub") or shame_ch
-                        if game_hub:
-                            squid_embed = build_squid_elimination_embed(elim)
-                            s_file = discord.File(io.BytesIO(elim.audio_bytes), filename="elimination.wav") if elim.audio_bytes else None
-                            try:
-                                await game_hub.send(
-                                    content=f"💀 **SQUID GAME ELIMINATION:** <@{act.user_id}> has been terminated for missing task {act.task_id}!",
-                                    embed=squid_embed,
-                                    file=s_file,
-                                    allowed_mentions=allowed_mentions
-                                )
-                            except Exception as e:
-                                logger.warning("Could not dispatch Squid Game elimination notice: %s", e)
 
                 await self.service.acknowledge_shame(act.task_id)
         except Exception as e:

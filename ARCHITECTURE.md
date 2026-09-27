@@ -44,10 +44,6 @@ discord_group_work/
 │   │   │   ├── member_preference.py # Member preference aggregate: IANA timezone, quiet hours (DND) window
 │   │   │   ├── project_state.py     # Project aggregate: sprint lifecycle (ACTIVE, ARCHIVED)
 │   │   │   ├── extension_request.py # ExtensionRequest aggregate: peer approvals, majority resolution
-│   │   │   ├── squid_player.py      # SquidPlayer aggregate: vital status, player numbers (001-456), streaks
-│   │   │   ├── squid_season.py      # SquidSeason aggregate: piggy bank pot calculation, bounty increments
-│   │   │   ├── guard_voice.py       # Masked guard & doll speech scripts, vocal profiles
-│   │   │   ├── movement_anomaly.py  # MovementAnomaly value object: anti-cheat audit trails & latency grace tracking
 │   │   │   ├── channel_binding.py   # ChannelBinding value object: persistent guild channel snowflake ID mapping
 │   │   │   └── alert_fire.py        # AlertFire value object: idempotent notification tracking across restarts
 │   │   └── interfaces/
@@ -79,8 +75,6 @@ discord_group_work/
 │   │       ├── activity_service.py  # Metrics use cases (record message, generate reports)
 │   │       ├── preference_service.py# Preference use cases (set timezone, quiet hours, DND evaluation)
 │   │       ├── voice_service.py     # Voice use cases (speech synthesis, alert scripts, report briefings)
-│   │       ├── squid_service.py     # Squid Game use cases (enrollment 001-456, elimination audio, pot tally)
-│   │       ├── red_light_service.py # Red Light Green Light session state, rate limiting, and move progression
 │   │       ├── vault_service.py     # Vault use cases (verify SHA-256, store, record submission)
 │   │       ├── project_service.py   # Lifecycle use cases (status dashboard, finish/archive)
 │   │       └── extension_service.py # Extension use cases (request, cast vote, majority conclude)
@@ -96,7 +90,6 @@ discord_group_work/
 │   │   │   ├── preference_sqlite_repo.py# SQLite implementation of PreferenceRepository
 │   │   │   ├── project_sqlite_repo.py # SQLite implementation of ProjectRepository
 │   │   │   ├── extension_sqlite_repo.py# SQLite implementation of ExtensionRepository
-│   │   │   ├── squid_sqlite_repo.py # SQLite implementation of SquidRepository (players, season, games)
 │   │   │   ├── channel_binding_sqlite_repo.py # SQLite implementation of ChannelBindingRepository
 │   │   │   └── alert_fire_sqlite_repo.py # SQLite implementation of AlertFireRepository
 │   │   ├── storage/
@@ -108,29 +101,45 @@ discord_group_work/
 │   │       ├── mock_synthesizer.py  # Standard library in-memory WAV generator for test isolation
 │   │       └── attachment_deliverer.py# Discord audio file attachment delivery adapter
 │   │
-│   └── interface/                   # ENTRY POINTS: Discord Cogs, Embeds, Client
+│   ├── interface/                   # ENTRY POINTS: Discord Cogs, Embeds, Client
 │       ├── __init__.py
 │       ├── bot.py                   # GroupAccountabilityBot Discord client subclass
 │       ├── channel_router.py        # Centralized 4-tier channel resolver & emergency fallback logger
-│       ├── red_light_runner.py      # Automated RLGL match execution, early conditional end & arena cleanup
-│       ├── discord_formatters.py    # Discord Embed card formatters (Hot Pink #FF0090 Squid styling)
-│       ├── squid_formatters.py      # Specialized Squid Game enrollment, track status, and elimination embeds
-│       ├── views/
-│       │   └── move_view.py         # Persistent MoveView with custom_id="rlgl:move" and unchanging label
+│       ├── channel_manager.py       # Channel provisioning & permission policies (ledger/arena/spectators)
+│       ├── discord_formatters.py    # Task, deadline, report, and vault embed formatters
 │       └── cogs/
 │           ├── __init__.py
 │           ├── task_buttons.py      # Persistent TaskActionView (Nudge, In-Progress, Complete, Verify, Extend)
 │           ├── extension_buttons.py # Persistent ExtensionVoteView (Approve, Reject, Conclude)
-│           ├── tasks_cog.py         # /task commands, buddy verification, escalation, voice nudges & Wall of Shame loop
+│           ├── tasks_cog.py         # /task commands, buddy verification, escalation & voice nudges
+│           ├── task_reminder_cog.py # 2-min reminder loop, T-minus DMs, Wall of Shame posts
 │           ├── preference_cog.py    # /timezone commands (set, quiet, view)
 │           ├── voice_cog.py         # /say command (arbitrary speech with tone/language flags)
-│           ├── squid_cog.py         # /squid (join, status, announce, eliminate, reset, redlight)
-│           ├── move_command_cog.py  # /move command (rate limited, latency grace, ephemeral feedback)
 │           ├── deadlines_cog.py     # /deadline add, /deadline list, 15m countdown update loop & voice alerts
 │           ├── reports_cog.py       # /report (team leaderboard, military ranks, on-time streaks & voice briefing)
 │           ├── tracker_cog.py       # on_message counting & in-server /submit deliverable receiver
 │           ├── admin_cog.py         # /setup, /guide, read-only protection, and /project commands
 │           └── cleanup_cog.py       # /cleanup (bulk purge) and /clean_arena (arena maintenance)
+│   └── plugins/                      # Feature modules (self-contained plugin runtime)
+│       ├── __init__.py               # Plugin registry (get_plugins)
+│       ├── base.py                   # Plugin base contract + lifecycle
+│       ├── bank/                     # spi economy: accounts, transfers, tax, treasury
+│       ├── groupwork/                # Accountability: tasks, deadlines, reports, vault
+│       ├── radio/                    # Voice radio station
+│       ├── society/                  # Governance: laws, citizenship, proposals
+│       └── games/                    # Games arena: event lifecycle + round modules
+│           ├── __init__.py
+│           ├── plugin.py             # GamesPlugin: schema, cogs, bank wiring
+│           ├── schema.py             # events, players, votes, anomalies tables
+│           ├── domain.py             # Event, Player, Vote + guard voice lines
+│           ├── repository.py         # SQLiteGamesRepository
+│           ├── service.py            # ArenaService: lifecycle, elimination, payout
+│           ├── game.py               # Game contract + registry
+│           ├── red_light.py          # Red Light Green Light game module (round 1)
+│           ├── runner.py             # RLGL match loop
+│           ├── cog.py                # GamesCog (/event) + MoveCog (/move)
+│           ├── move_view.py          # MOVE button view
+│           └── formatters.py         # pink #FF0090 embeds
 │
 ├── tests/
 │   ├── __init__.py
@@ -141,7 +150,6 @@ discord_group_work/
 │   │   │   ├── test_activity_entity.py
 │   │   │   ├── test_preference_entity.py
 │   │   │   ├── test_voice_profile.py
-│   │   │   ├── test_squid_entities.py
 │   │   │   ├── test_project_state_entity.py
 │   │   │   └── test_extension_entity.py
 │   │   └── application/
@@ -149,7 +157,6 @@ discord_group_work/
 │   │       ├── test_deadline_service.py
 │   │       ├── test_preference_service.py
 │   │       ├── test_voice_service.py
-│   │       ├── test_squid_service.py
 │   │       ├── test_vault_service.py
 │   │       ├── test_project_service.py
 │   │       └── test_extension_service.py
@@ -159,8 +166,7 @@ discord_group_work/
 │       │   ├── test_activity_repository.py
 │       │   ├── test_preference_repository.py
 │       │   ├── test_project_repository.py
-│       │   ├── test_extension_repository.py
-│       │   └── test_squid_repository.py
+│       │   └── test_extension_repository.py
 │       └── speech/
 │           └── test_espeak_synthesizer.py
 │
@@ -211,11 +217,12 @@ discord_group_work/
 1. Member joins games via `/squid join` in `#game-hub`.
 2. `SquidService.enroll_player(guild_id, user_id)` assigns next available sequential 3-digit identifier (`"001"` through `"456"`).
 3. `SquidRepository` stores `SquidPlayer` entity in SQLite.
-4. Overdue Task Elimination integration: When a task hits terminal overdue threshold in `tasks_cog.py`, `SquidService.eliminate_player(guild_id, user_id, reason="Terminal task overdue")` executes:
-   - Marks player as eliminated.
-   - Increases guild prize pot (+100,000,000 ₩ per eliminated player).
-   - Generates masked guard elimination audio via `espeak-ng` (`-s 110 -p 15 -v en-us`, e.g., *"Player zero six seven. Eliminated."*).
-   - Dispatches elimination embed styled in Squid Game Pink (`#FF0090`) to `#game-hub` with audio attachment.
+4. Elimination is game-driven only. Three sources, none of which touches the accountability system:
+   - **Red Light violation**: any `/move` during `RED_LIGHT` outside the latency grace window eliminates the player.
+   - **Timeout**: failing to reach the 100m finish line before the round timer expires eliminates the player.
+   - **Front Man override**: `/squid eliminate <member> <reason>` manually eliminates a player.
+5. On elimination, `SquidService.eliminate_player(...)` marks the player as eliminated, increases the guild prize pot (+100,000,000 ₩ per eliminated player), and synthesizes masked guard elimination audio via `espeak-ng` (`-s 110 -p 15 -v en-us`, e.g. *"Player zero six seven. Eliminated."*). The interface layer then swaps the member to the Spectator role and posts an elimination embed styled in Squid Game Pink (`#FF0090`) to `#game-hub` with the audio attachment.
+6. Overdue tasks do **not** eliminate players. Accountability and games are decoupled: a delinquent task carries a 25 spi fine (burned from the member's balance) and a Wall of Shame post, never an arena elimination.
 
 ### 4.5 Red Light Green Light Minigame Flow
 1. Front Man or group launches game via `/squid redlight start`.
@@ -234,6 +241,6 @@ discord_group_work/
 
 ## 6. Open Questions & Design Decisions
 - *Q: How does Squid Game integrate with the serious academic accountability tracking?*
-  - **A**: It acts as an optional, high-engagement motivational layer. Academic accountability records (tasks, submissions, hashes) remain completely pristine in SQLite. In Squid Game mode, terminal overdue tasks translate into in-fiction player eliminations with masked guard audio announcements.
+  - **A**: It doesn't, by design. The two systems are decoupled. Academic accountability (tasks, submissions, hashes, the 25 spi overdue fine) stays self-contained in SQLite and the bank ledger. Game players are eliminated only by game rules or Front Man override, never by homework state.
 - *Q: What timezone is assumed if none is supplied?*
   - **A**: UTC is the system internal standard. The config specifies `DEFAULT_TIMEZONE=UTC`.

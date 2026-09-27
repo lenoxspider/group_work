@@ -1,6 +1,6 @@
 """Bank application service - orchestration over the repository."""
 
-from src.plugins.bank.domain import SINK, TREASURY, Transaction
+from src.plugins.bank.domain import POT, SINK, TREASURY, Transaction
 from src.plugins.bank.repository import SQLiteBankRepository
 
 
@@ -33,7 +33,7 @@ class BankService:
         self, guild_id: str, from_user: str, to_user: str, amount: int, reason: str = ""
     ) -> Transaction:
         tax = 0
-        if from_user not in (TREASURY, SINK) and to_user not in (TREASURY, SINK):
+        if from_user not in (TREASURY, SINK, POT) and to_user not in (TREASURY, SINK, POT):
             rate = await self.repo.get_tax_rate(guild_id)
             if rate > 0:
                 tax = amount * rate // 10000

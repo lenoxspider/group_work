@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 TREASURY = "__treasury__"
 SINK = "__sink__"
+POT = "__pot__"
 
 
 class BankError(Exception):
