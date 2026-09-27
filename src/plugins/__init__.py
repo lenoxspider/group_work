@@ -15,9 +15,11 @@ def get_plugins(bot) -> list[Plugin]:
     from src.plugins.bank.plugin import BankPlugin
     from src.plugins.groupwork.plugin import GroupworkPlugin
     from src.plugins.radio.plugin import RadioPlugin
+    from src.plugins.society.plugin import SocietyPlugin
 
     return [
         GroupworkPlugin(bot),
         BankPlugin(bot),
         RadioPlugin(bot),
+        SocietyPlugin(bot),
     ]

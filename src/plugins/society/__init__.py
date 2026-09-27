@@ -1,0 +1,1 @@
+"""Society plugin package."""

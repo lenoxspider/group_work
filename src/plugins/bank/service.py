@@ -11,6 +11,10 @@ class BankService:
     async def balance(self, guild_id: str, user_id: str) -> int:
         return await self.repo.get_balance(guild_id, user_id)
 
+    async def treasury_balance(self, guild_id: str) -> int:
+        """Net minted supply (negative when spi has been printed into circulation)."""
+        return await self.repo.get_balance(guild_id, TREASURY)
+
     async def ensure_account(self, guild_id: str, user_id: str) -> None:
         await self.repo.ensure_account(guild_id, user_id)
 
