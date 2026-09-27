@@ -102,6 +102,32 @@ class CommunityService:
         member.signed_at = now
         return member
 
+    async def enroll_existing(self, guild_id: str, user_ids, as_citizen: bool) -> int:
+        """Backfill members who predate the community system. Returns count enrolled."""
+        enrolled = 0
+        for user_id in user_ids:
+            if await self.repo.get_member(guild_id, user_id):
+                continue
+            if self.bank:
+                try:
+                    await self.bank.ensure_account(guild_id, user_id)
+                except Exception:
+                    pass
+            now = utcnow()
+            if as_citizen:
+                await self.repo.register(
+                    Member(guild_id=guild_id, user_id=user_id, status=CITIZEN, joined_at=now, signed_at=now)
+                )
+            else:
+                await self.repo.register(
+                    Member(guild_id=guild_id, user_id=user_id, status=CATIZEN, joined_at=now)
+                )
+                task = await self._assign_intro_task(guild_id, user_id)
+                if task:
+                    await self.repo.set_intro_task(guild_id, user_id, task.task_id)
+            enrolled += 1
+        return enrolled
+
     async def list_laws(self, guild_id: str):
         if not self.society:
             return []

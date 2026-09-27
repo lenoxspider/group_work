@@ -1,7 +1,7 @@
 """Community Cog - onboarding, the constitution sign, and membership status."""
 
 import logging
-from typing import Optional
+from typing import Literal, Optional
 
 import discord
 from discord import app_commands
@@ -26,6 +26,8 @@ class CommunityCog(commands.Cog, name="Community"):
         self.bot = bot
         self.service = service
         self.channel_router = channel_router
+
+    citizens = app_commands.Group(name="citizens", description="Membership administration")
 
     async def _new_recruits_channel(self, guild: discord.Guild):
         if self.channel_router:
@@ -149,3 +151,31 @@ class CommunityCog(commands.Cog, name="Community"):
         if member.status == CATIZEN:
             embed.set_footer(text="Run /join to sign the constitution and become a citizen.")
         await interaction.followup.send(embed=embed)
+
+    @citizens.command(name="setup", description="[Admin] Enroll existing members into the community system")
+    @app_commands.describe(mode="grandfather = full citizens now; recruit = they must sign + post an intro")
+    @app_commands.checks.has_permissions(manage_channels=True)
+    async def citizens_setup(self, interaction: discord.Interaction, mode: Literal["grandfather", "recruit"]):
+        await interaction.response.defer()
+        guild = interaction.guild
+        if not guild:
+            await interaction.followup.send("This must be run inside the server.", ephemeral=True)
+            return
+
+        member_ids = []
+        try:
+            async for member in guild.fetch_members(limit=None):
+                if not member.bot:
+                    member_ids.append(str(member.id))
+        except Exception as e:
+            await interaction.followup.send(f"Could not fetch members: {e}", ephemeral=True)
+            return
+
+        enrolled = await self.service.enroll_existing(
+            str(guild.id), member_ids, as_citizen=(mode == "grandfather")
+        )
+        label = "citizens (grandfathered)" if mode == "grandfather" else "catizens (must sign + intro)"
+        await interaction.followup.send(
+            f"✅ Enrolled **{enrolled}** existing members as {label}. "
+            f"(Members already registered were left untouched.)"
+        )

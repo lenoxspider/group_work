@@ -36,6 +36,7 @@ class GroupAccountabilityBot(commands.Bot):
     def __init__(self, settings: Settings):
         intents = discord.Intents.default()
         intents.message_content = True
+        intents.members = True
         intents.guilds = True
         intents.messages = True
 
