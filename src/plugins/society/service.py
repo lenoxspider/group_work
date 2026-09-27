@@ -156,6 +156,17 @@ class SocietyService:
             return 0
         return await self.bank.treasury_balance(guild_id)
 
+    async def get_tax_rate(self, guild_id: str) -> int:
+        if not self.bank:
+            return 0
+        return await self.bank.get_tax_rate(guild_id)
+
+    async def set_tax_rate(self, guild_id: str, rate_bps: int) -> int:
+        if not self.bank:
+            from src.plugins.society.domain import SocietyError
+            raise SocietyError("Bank is not available.")
+        return await self.bank.set_tax_rate(guild_id, rate_bps)
+
     async def citizenship(self, guild_id: str, user_id: str) -> Tuple[int, str, int, str]:
         if not self.bank:
             return 0, "Resident", 0, ""

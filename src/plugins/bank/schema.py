@@ -30,4 +30,10 @@ BANK_SCHEMA = [
     CREATE INDEX IF NOT EXISTS idx_bank_tx_users
     ON bank_transactions (guild_id, from_user, to_user)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS bank_settings (
+        guild_id TEXT PRIMARY KEY,
+        tax_rate_bps INTEGER NOT NULL DEFAULT 0
+    )
+    """,
 ]

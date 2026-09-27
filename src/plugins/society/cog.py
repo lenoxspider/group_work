@@ -94,6 +94,28 @@ class SocietyCog(commands.Cog, name="Society"):
         embed.add_field(name="Treasury account", value=f"{treasury:,} spi", inline=True)
         await interaction.followup.send(embed=embed)
 
+    @society.command(name="tax", description="View the current transfer tax rate")
+    async def tax(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        bps = await self.service.get_tax_rate(str(interaction.guild_id))
+        await interaction.followup.send(f"💰 Transfer tax rate: **{bps / 100:g}%**")
+
+    @society.command(name="set_tax", description="[Admin] Set the transfer tax rate (percent)")
+    @app_commands.describe(rate="Tax rate as a percentage, e.g. 2.5")
+    @app_commands.checks.has_permissions(manage_channels=True)
+    async def set_tax(self, interaction: discord.Interaction, rate: float):
+        await interaction.response.defer()
+        if rate < 0 or rate > 100:
+            await interaction.followup.send("❌ Rate must be between 0 and 100 percent.", ephemeral=True)
+            return
+        bps = int(round(rate * 100))
+        try:
+            await self.service.set_tax_rate(str(interaction.guild_id), bps)
+        except (ValueError, SocietyError) as e:
+            await interaction.followup.send(f"❌ {e}", ephemeral=True)
+            return
+        await interaction.followup.send(f"💰 Transfer tax rate set to **{bps / 100:g}%**.")
+
     @society.command(name="propose", description="Submit a proposal for democratic vote")
     @app_commands.describe(title="Proposal title", amount="spi requested from the treasury (0 for non-spending)", description="What and why")
     async def propose(self, interaction: discord.Interaction, title: str, description: str, amount: int = 0):

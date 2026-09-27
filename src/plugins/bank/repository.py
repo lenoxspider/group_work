@@ -45,6 +45,24 @@ class SQLiteBankRepository:
             )
             await db.commit()
 
+    async def get_tax_rate(self, guild_id: str) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cur = await db.execute(
+                "SELECT tax_rate_bps FROM bank_settings WHERE guild_id = ?",
+                (guild_id,),
+            )
+            row = await cur.fetchone()
+            return row[0] if row else 0
+
+    async def set_tax_rate(self, guild_id: str, rate_bps: int) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "INSERT INTO bank_settings (guild_id, tax_rate_bps) VALUES (?, ?) "
+                "ON CONFLICT(guild_id) DO UPDATE SET tax_rate_bps = excluded.tax_rate_bps",
+                (guild_id, rate_bps),
+            )
+            await db.commit()
+
     async def transfer(
         self,
         guild_id: str,
@@ -52,6 +70,7 @@ class SQLiteBankRepository:
         to_user: str,
         amount: int,
         reason: str = "",
+        tax_amount: int = 0,
     ) -> Transaction:
         if amount < 0:
             raise InvalidAmount("amount cannot be negative")
@@ -59,7 +78,12 @@ class SQLiteBankRepository:
             return Transaction(uuid.uuid4().hex, guild_id, from_user, to_user, 0, reason, utcnow())
         if from_user == to_user:
             raise SelfTransfer("cannot transfer to yourself")
+        if tax_amount < 0:
+            raise InvalidAmount("tax cannot be negative")
+        if tax_amount >= amount:
+            raise InvalidAmount("tax must be less than the transfer amount")
 
+        net = amount - tax_amount
         now = utcnow()
         tx_id = uuid.uuid4().hex
 
@@ -77,6 +101,12 @@ class SQLiteBankRepository:
                 "VALUES (?, ?, 0, ?, ?)",
                 (guild_id, to_user, now, now),
             )
+            if tax_amount > 0:
+                await db.execute(
+                    "INSERT OR IGNORE INTO bank_accounts (guild_id, user_id, balance, created_at, updated_at) "
+                    "VALUES (?, ?, 0, ?, ?)",
+                    (guild_id, TREASURY, now, now),
+                )
 
             if from_user != TREASURY:
                 cur = await db.execute(
@@ -98,14 +128,28 @@ class SQLiteBankRepository:
             await db.execute(
                 "UPDATE bank_accounts SET balance = balance + ?, updated_at = ? "
                 "WHERE guild_id = ? AND user_id = ?",
-                (amount, now, guild_id, to_user),
+                (net, now, guild_id, to_user),
             )
+            if tax_amount > 0:
+                await db.execute(
+                    "UPDATE bank_accounts SET balance = balance + ?, updated_at = ? "
+                    "WHERE guild_id = ? AND user_id = ?",
+                    (tax_amount, now, guild_id, TREASURY),
+                )
+
             await db.execute(
                 "INSERT INTO bank_transactions "
                 "(tx_id, guild_id, from_user, to_user, amount, reason, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (tx_id, guild_id, from_user, to_user, amount, reason, now),
+                (tx_id, guild_id, from_user, to_user, net, reason, now),
             )
+            if tax_amount > 0:
+                await db.execute(
+                    "INSERT INTO bank_transactions "
+                    "(tx_id, guild_id, from_user, to_user, amount, reason, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (uuid.uuid4().hex, guild_id, from_user, TREASURY, tax_amount, "transfer tax", now),
+                )
 
             await db.commit()
         except Exception:
@@ -114,7 +158,7 @@ class SQLiteBankRepository:
         finally:
             await db.close()
 
-        return Transaction(tx_id, guild_id, from_user, to_user, amount, reason, now)
+        return Transaction(tx_id, guild_id, from_user, to_user, net, reason, now)
 
     async def ledger(self, guild_id: str, user_id: str, limit: int = 20) -> list[Transaction]:
         async with aiosqlite.connect(self.db_path) as db:

@@ -18,10 +18,26 @@ class BankService:
     async def ensure_account(self, guild_id: str, user_id: str) -> None:
         await self.repo.ensure_account(guild_id, user_id)
 
+    async def get_tax_rate(self, guild_id: str) -> int:
+        """Current transfer tax rate in basis points (250 = 2.5%)."""
+        return await self.repo.get_tax_rate(guild_id)
+
+    async def set_tax_rate(self, guild_id: str, rate_bps: int) -> int:
+        """Set the transfer tax rate in basis points. 0 disables taxation."""
+        if rate_bps < 0 or rate_bps > 10000:
+            raise ValueError("tax rate must be between 0 and 10000 basis points (0% to 100%)")
+        await self.repo.set_tax_rate(guild_id, rate_bps)
+        return rate_bps
+
     async def transfer(
         self, guild_id: str, from_user: str, to_user: str, amount: int, reason: str = ""
     ) -> Transaction:
-        return await self.repo.transfer(guild_id, from_user, to_user, amount, reason)
+        tax = 0
+        if from_user not in (TREASURY, SINK) and to_user not in (TREASURY, SINK):
+            rate = await self.repo.get_tax_rate(guild_id)
+            if rate > 0:
+                tax = amount * rate // 10000
+        return await self.repo.transfer(guild_id, from_user, to_user, amount, reason, tax_amount=tax)
 
     async def grant(self, guild_id: str, user_id: str, amount: int, reason: str = "") -> Transaction:
         """Mint spi from the treasury faucet into an account."""
