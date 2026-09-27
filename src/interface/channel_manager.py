@@ -96,11 +96,26 @@ def _policy_bot_log(guild: discord.Guild) -> Dict:
     return {guild.default_role: _private(), guild.me: _bot_full()}
 
 
+def _policy_recruits(guild: discord.Guild) -> Dict:
+    """#new-recruits: private to the Catizen role (un-signed recruits) + bot."""
+    ow = {guild.default_role: _private(), guild.me: _bot_full()}
+    catizen = discord.utils.get(guild.roles, name="Catizen")
+    if catizen:
+        ow[catizen] = discord.PermissionOverwrite(
+            view_channel=True,
+            read_message_history=True,
+            send_messages=True,
+            use_application_commands=True,
+        )
+    return ow
+
+
 POLICIES = {
     "ledger": _policy_ledger,
     "arena": _policy_arena,
     "spectators": _policy_spectators,
     "bot-log": _policy_bot_log,
+    "recruits": _policy_recruits,
 }
 
 

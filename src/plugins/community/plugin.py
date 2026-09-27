@@ -28,7 +28,7 @@ class CommunityPlugin(Plugin):
             ChannelDecl(
                 "new-recruits",
                 "👋 New members introduce themselves here. Task #1 for every catizen.",
-                "ledger",
+                "recruits",
             ),
         ]
 

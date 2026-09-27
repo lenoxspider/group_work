@@ -47,6 +47,13 @@ class CommunityCog(commands.Cog, name="Community"):
         user_id = str(member.id)
         await self.service.on_join(guild_id, user_id)
 
+        try:
+            catizen_role = discord.utils.get(member.guild.roles, name="Catizen")
+            if catizen_role and catizen_role not in member.roles:
+                await member.add_roles(catizen_role, reason="New recruit - access to #new-recruits")
+        except Exception as e:
+            logger.warning("Could not grant Catizen role to %s: %s", user_id, e)
+
         ch = await self._new_recruits_channel(member.guild)
         embed = discord.Embed(
             title="🐱 A catizen has wandered in",
@@ -99,6 +106,21 @@ class CommunityCog(commands.Cog, name="Community"):
         except Exception:
             pass
 
+        hall = await self._town_hall_channel(message.guild)
+        if hall:
+            try:
+                embed = discord.Embed(
+                    title="🎖️ A new comrade arrives",
+                    description=(
+                        f"Everyone welcome **{message.author.mention}** - they've completed "
+                        "their intro and are earning their way in."
+                    ),
+                    color=PINK,
+                )
+                await hall.send(embed=embed)
+            except Exception as e:
+                logger.warning("Could not post welcome-bridge to #town-hall: %s", e)
+
     @app_commands.command(name="join", description="Sign the constitution and become a citizen")
     async def join(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -107,6 +129,14 @@ class CommunityCog(commands.Cog, name="Community"):
 
         laws = await self.service.list_laws(guild_id)
         member = await self.service.sign(guild_id, user_id)
+
+        if interaction.guild and isinstance(interaction.user, discord.Member):
+            try:
+                catizen_role = discord.utils.get(interaction.guild.roles, name="Catizen")
+                if catizen_role and catizen_role in interaction.user.roles:
+                    await interaction.user.remove_roles(catizen_role, reason="Signed the constitution")
+            except Exception as e:
+                logger.warning("Could not remove Catizen role: %s", e)
 
         if member.status == CITIZEN:
             law_lines = (

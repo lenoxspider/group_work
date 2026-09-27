@@ -75,6 +75,17 @@ class AdminCog(commands.Cog, name="Administration"):
                 except Exception as e:
                     logger.warning("Could not auto-create Spectator role in guild %s: %s", guild.id, e)
 
+            if not discord.utils.get(guild.roles, name="Catizen"):
+                try:
+                    await guild.create_role(
+                        name="Catizen",
+                        color=discord.Color.from_rgb(200, 160, 100),
+                        mentionable=False,
+                        reason="Un-signed community recruit (pre-citizenship)"
+                    )
+                except Exception as e:
+                    logger.warning("Could not auto-create Catizen role in guild %s: %s", guild.id, e)
+
         # Hierarchy check
         if player_role and guild.me.top_role.position <= player_role.position:
             hierarchy_warning = (
