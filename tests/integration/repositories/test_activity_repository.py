@@ -5,6 +5,7 @@ import tempfile
 import unittest
 
 from src.infrastructure.database.connection import DatabaseManager
+from src.plugins.groupwork.schema import GROUPWORK_SCHEMA
 from src.infrastructure.database.activity_sqlite_repo import SQLiteActivityRepository
 
 class TestSQLiteActivityRepository(unittest.IsolatedAsyncioTestCase):
@@ -13,6 +14,7 @@ class TestSQLiteActivityRepository(unittest.IsolatedAsyncioTestCase):
         self.temp_file = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
         self.temp_file.close()
         self.db_manager = DatabaseManager(self.temp_file.name)
+        self.db_manager.register_plugin_schema("groupwork", GROUPWORK_SCHEMA)
         await self.db_manager.initialize_schema()
         self.repo = SQLiteActivityRepository(self.temp_file.name)
 

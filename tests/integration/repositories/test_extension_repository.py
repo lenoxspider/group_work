@@ -6,6 +6,7 @@ import unittest
 from datetime import datetime, timezone, timedelta
 
 from src.infrastructure.database.connection import DatabaseManager
+from src.plugins.groupwork.schema import GROUPWORK_SCHEMA
 from src.infrastructure.database.extension_sqlite_repo import SQLiteExtensionRepository
 from src.domain.entities.extension_request import ExtensionRequest
 
@@ -15,6 +16,7 @@ class TestSQLiteExtensionRepository(unittest.IsolatedAsyncioTestCase):
         self.temp_file = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
         self.temp_file.close()
         self.db_manager = DatabaseManager(self.temp_file.name)
+        self.db_manager.register_plugin_schema("groupwork", GROUPWORK_SCHEMA)
         await self.db_manager.initialize_schema()
         self.repo = SQLiteExtensionRepository(self.temp_file.name)
 

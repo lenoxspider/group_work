@@ -6,6 +6,8 @@ import unittest
 from datetime import datetime, timezone
 
 from src.infrastructure.database.connection import DatabaseManager
+from src.infrastructure.database.core_schema import CORE_SCHEMA
+from src.plugins.groupwork.schema import GROUPWORK_SCHEMA
 from src.domain.entities.channel_binding import ChannelBinding
 from src.domain.entities.alert_fire import AlertFire
 from src.infrastructure.database.channel_binding_sqlite_repo import SQLiteChannelBindingRepository
@@ -19,6 +21,8 @@ class TestChannelAndAlertRepositories(unittest.IsolatedAsyncioTestCase):
         self.temp_db.close()
 
         self.db_manager = DatabaseManager(self.db_path)
+        self.db_manager.register_plugin_schema("core", CORE_SCHEMA)
+        self.db_manager.register_plugin_schema("groupwork", GROUPWORK_SCHEMA)
         await self.db_manager.initialize_schema()
         self.binding_repo = SQLiteChannelBindingRepository(self.db_path)
         self.alert_repo = SQLiteAlertFireRepository(self.db_path)
