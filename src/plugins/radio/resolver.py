@@ -18,6 +18,8 @@ class SourceResolver:
         return f"ytsearch1:{query}"
 
     def _extract(self, query: str) -> dict:
+        import os
+
         import yt_dlp
 
         opts = {
@@ -26,7 +28,14 @@ class SourceResolver:
             "no_warnings": True,
             "noplaylist": True,
             "extract_flat": False,
+            "socket_timeout": 30,
+            "retries": 3,
+            "extractor_retries": 3,
         }
+        # YouTube bot-checks datacenter IPs; log-in cookies bypass it.
+        cookies = os.getenv("YTDLP_COOKIES", "").strip()
+        if cookies and os.path.exists(cookies):
+            opts["cookiefile"] = cookies
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(query, download=False)
 

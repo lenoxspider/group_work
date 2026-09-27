@@ -1,6 +1,9 @@
 # Environment secrets
 .env
 
+# YouTube cookies for yt-dlp (session secret)
+cookies.txt
+
 # Python virtual environment
 .venv/
 
