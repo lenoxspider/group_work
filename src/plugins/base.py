@@ -23,6 +23,7 @@ class Plugin:
     name: str = "unnamed"
     schema: List[str] = []
     migrations: List[tuple] = []
+    channels: List[object] = []
 
     def build_cogs(self, bot) -> List[object]:
         """Return a list of discord.py Cog instances to mount."""

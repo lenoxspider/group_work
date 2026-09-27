@@ -8,6 +8,7 @@ The bot's composition root now only constructs shared infrastructure
 
 from src.plugins.base import Plugin
 from src.plugins.groupwork.schema import GROUPWORK_MIGRATIONS, GROUPWORK_SCHEMA
+from src.interface.channel_manager import ChannelDecl
 
 from src.infrastructure.database.task_sqlite_repo import SQLiteTaskRepository
 from src.infrastructure.database.deadline_sqlite_repo import SQLiteDeadlineRepository
@@ -16,7 +17,6 @@ from src.infrastructure.database.project_sqlite_repo import SQLiteProjectReposit
 from src.infrastructure.database.extension_sqlite_repo import SQLiteExtensionRepository
 from src.infrastructure.database.preference_sqlite_repo import SQLitePreferenceRepository
 from src.infrastructure.database.squid_sqlite_repo import SquidSqliteRepository
-from src.infrastructure.database.channel_binding_sqlite_repo import SQLiteChannelBindingRepository
 from src.infrastructure.database.alert_fire_sqlite_repo import SQLiteAlertFireRepository
 from src.infrastructure.storage.local_file_vault import LocalFileVault
 
@@ -29,8 +29,6 @@ from src.application.services.extension_service import ExtensionService
 from src.application.services.preference_service import PreferenceService
 from src.application.services.voice_service import VoiceService
 from src.application.services.squid_service import SquidService
-
-from src.interface.channel_router import ChannelRouter
 
 from src.interface.cogs.tasks_cog import TasksCog
 from src.interface.cogs.task_reminder_cog import TaskReminderCog
@@ -54,6 +52,29 @@ class GroupworkPlugin(Plugin):
         self.bot = bot
         settings = bot.settings
 
+        # Declared channels: ledger names come from config, game channels are fixed
+        self.channels = [
+            ChannelDecl(settings.tasks_channel, "📋 Group task ledger. Read-only display. Use /task to interact.", "ledger"),
+            ChannelDecl(settings.deadlines_channel, "🎯 Major project milestones and live countdowns. Read-only display.", "ledger"),
+            ChannelDecl(settings.submissions_channel, "📥 Verified deliverable submission vault. Read-only audit receipts.", "ledger"),
+            ChannelDecl(settings.wall_of_shame_channel, "🚨 Public accountability ledger. Overdue tasks recorded here.", "ledger"),
+            ChannelDecl(
+                "game-hub",
+                "🎮 Squid Game Arena. Only active Players can execute commands.",
+                "arena",
+                welcome="○ △ □ SQUID GAME ARENA • INITIALIZED\n\n"
+                        "**How to play:**\n"
+                        "• Type `/squid join` to claim your player tag (`001`–`456`) and gain arena access.\n"
+                        "• Eliminated players are moved to the private <#spectators> lounge.\n"
+                        "• Obey all directives from the Masked Guards.",
+            ),
+            ChannelDecl("spectators", "💀 Observation deck for eliminated contestants.", "spectators"),
+            ChannelDecl("bot-log", "🛡️ Bot admin and security audit log. Private to staff and bot.", "bot-log"),
+        ]
+
+        # Shared channel infrastructure lives on the bot core
+        self.channel_router = bot.channel_router
+
         # Repositories & storage
         self.task_repo = SQLiteTaskRepository(settings.database_path)
         self.deadline_repo = SQLiteDeadlineRepository(settings.database_path)
@@ -62,12 +83,8 @@ class GroupworkPlugin(Plugin):
         self.extension_repo = SQLiteExtensionRepository(settings.database_path)
         self.preference_repo = SQLitePreferenceRepository(settings.database_path)
         self.squid_repo = SquidSqliteRepository(settings.database_path)
-        self.channel_binding_repo = SQLiteChannelBindingRepository(settings.database_path)
         self.alert_fire_repo = SQLiteAlertFireRepository(settings.database_path)
         self.file_vault = LocalFileVault(settings.uploads_dir)
-
-        # Router
-        self.channel_router = ChannelRouter(bot, self.channel_binding_repo)
 
         # Services
         self.task_service = TaskService(self.task_repo, self.activity_repo)
@@ -96,7 +113,7 @@ class GroupworkPlugin(Plugin):
             DeadlinesCog(bot, self.deadline_service, self.channel_router, self.voice_service),
             ReportsCog(bot, self.activity_service, self.voice_service),
             TrackerCog(bot, self.activity_service, self.vault_service, self.channel_router),
-            AdminCog(bot, self.project_service, self.channel_router),
+            AdminCog(bot, self.project_service),
             PreferenceCog(bot, self.preference_service),
             CleanupCog(bot, self.channel_router),
         ]

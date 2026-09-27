@@ -17,7 +17,6 @@ from discord import app_commands
 from discord.ext import commands
 
 from src.application.services.project_service import ProjectService
-from src.interface.channel_router import ChannelRouter
 from src.domain.errors import AppError
 from src.interface.discord_formatters import (
     COLOR_PRIMARY,
@@ -31,17 +30,13 @@ logger = logging.getLogger("interface.cogs.admin")
 class AdminCog(commands.Cog, name="Administration"):
     """Interface adapter for server setup, permission locking, and project lifecycle."""
 
-    CATEGORY_NAME = "TOVARISHCH"
-
     def __init__(
         self,
         bot: commands.Bot,
-        project_service: ProjectService,
-        channel_router: ChannelRouter
+        project_service: ProjectService
     ):
         self.bot = bot
         self.project_service = project_service
-        self.channel_router = channel_router
 
     project_group = app_commands.Group(name="project", description="Group project and sprint lifecycle commands")
 
@@ -50,7 +45,7 @@ class AdminCog(commands.Cog, name="Administration"):
         guild: discord.Guild,
         repair: bool = False
     ) -> Tuple[List[discord.TextChannel], Optional[str]]:
-        """Creates or repairs all project channels, TOVARISHCH category, and role permissions."""
+        """Creates or repairs squid roles, then provisions every plugin's declared channels."""
         hierarchy_warning = None
 
         # 1. Provision Player and Spectator roles
@@ -87,129 +82,8 @@ class AdminCog(commands.Cog, name="Administration"):
                 f"or equal to the `Player` role! Please drag the bot's role higher in Server Settings → Roles."
             )
 
-        # 2. Provision or resolve TOVARISHCH Category
-        category = discord.utils.get(guild.categories, name=self.CATEGORY_NAME)
-        if not category and guild.me.guild_permissions.manage_channels:
-            try:
-                category = await guild.create_category(name=self.CATEGORY_NAME)
-            except Exception as e:
-                logger.warning("Could not create %s category in guild %s: %s", self.CATEGORY_NAME, guild.id, e)
-
-        # 3. Channel configuration matrix
-        read_only_everyone = discord.PermissionOverwrite(
-            view_channel=True,
-            read_message_history=True,
-            send_messages=False,
-            send_messages_in_threads=False,
-            create_public_threads=False,
-            create_private_threads=False,
-            add_reactions=False,
-            manage_webhooks=False,
-            use_application_commands=False
-        )
-
-        bot_full = discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=True,
-            manage_messages=True,
-            embed_links=True,
-            attach_files=True,
-            read_message_history=True,
-            manage_webhooks=True
-        )
-
-        channel_configs = [
-            ("tasks", "📋 Group task ledger. Read-only display. Use /task to interact.", {
-                guild.default_role: read_only_everyone,
-                guild.me: bot_full
-            }),
-            ("deadlines", "🎯 Major project milestones and live countdowns. Read-only display.", {
-                guild.default_role: read_only_everyone,
-                guild.me: bot_full
-            }),
-            ("submissions", "📥 Verified deliverable submission vault. Read-only audit receipts.", {
-                guild.default_role: read_only_everyone,
-                guild.me: bot_full
-            }),
-            ("wall-of-shame", "🚨 Public accountability ledger. Overdue tasks recorded here.", {
-                guild.default_role: read_only_everyone,
-                guild.me: bot_full
-            }),
-            ("game-hub", "🎮 Squid Game Arena. Only active Players can execute commands.", {
-                guild.default_role: discord.PermissionOverwrite(
-                    view_channel=True, read_message_history=True, send_messages=False, use_application_commands=True
-                ),
-                guild.me: bot_full,
-                **(
-                    {player_role: discord.PermissionOverwrite(
-                        view_channel=True, read_message_history=True, send_messages=True, use_application_commands=True, add_reactions=True
-                    )} if player_role else {}
-                ),
-                **(
-                    {spectator_role: discord.PermissionOverwrite(
-                        view_channel=True, read_message_history=True, send_messages=False, use_application_commands=False
-                    )} if spectator_role else {}
-                )
-            }),
-            ("spectators", "💀 Observation deck for eliminated contestants.", {
-                guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                guild.me: bot_full,
-                **(
-                    {spectator_role: discord.PermissionOverwrite(
-                        view_channel=True, read_message_history=True, send_messages=True
-                    )} if spectator_role else {}
-                )
-            }),
-            ("bot-log", "🛡️ Bot admin and security audit log. Private to staff and bot.", {
-                guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                guild.me: bot_full
-            })
-        ]
-
-        created_or_found = []
-        bindings = {}
-        for name, topic, overwrites in channel_configs:
-            ch = discord.utils.get(guild.text_channels, name=name)
-            is_new = False
-            if not ch and guild.me.guild_permissions.manage_channels:
-                try:
-                    ch = await guild.create_text_channel(
-                        name=name,
-                        topic=topic,
-                        category=category,
-                        overwrites=overwrites
-                    )
-                    is_new = True
-                except Exception as e:
-                    logger.warning("Could not auto-create #%s in guild %s: %s", name, guild.name, e)
-            elif ch and repair and guild.me.guild_permissions.manage_channels:
-                try:
-                    await ch.edit(topic=topic, category=category, overwrites=overwrites)
-                except Exception as e:
-                    logger.warning("Could not repair overwrites on #%s: %s", name, e)
-
-            if ch:
-                created_or_found.append(ch)
-                bindings[name] = str(ch.id)
-                if is_new and name == "game-hub":
-                    welcome_embed = discord.Embed(
-                        title="○ △ □ SQUID GAME ARENA • INITIALIZED",
-                        description=(
-                            "Welcome to the accountability arena.\n\n"
-                            "**How to play:**\n"
-                            "• Type `/squid join` to claim your player tag (`001`–`456`) and gain arena access.\n"
-                            "• Eliminated players are moved to the private <#spectators> lounge.\n"
-                            "• Obey all directives from the Masked Guards."
-                        ),
-                        color=discord.Color.from_rgb(255, 0, 144)
-                    )
-                    try:
-                        await ch.send(embed=welcome_embed)
-                    except Exception:
-                        pass
-
-        # 4. Persist bindings in SQLite
-        await self.channel_router.bind_all(str(guild.id), bindings)
+        # Provision every plugin's declared channels via the shared ChannelManager
+        created_or_found, _ = await self.bot.channel_manager.provision_all(guild, repair=repair)
         return created_or_found, hierarchy_warning
 
     @commands.Cog.listener()

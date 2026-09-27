@@ -18,8 +18,12 @@ from discord.ext import commands
 
 from src.config.settings import Settings
 from src.infrastructure.database.connection import DatabaseManager
+from src.infrastructure.database.core_schema import CORE_SCHEMA
+from src.infrastructure.database.channel_binding_sqlite_repo import SQLiteChannelBindingRepository
 from src.infrastructure.speech.espeak_synthesizer import EspeakSpeechSynthesizer
 from src.infrastructure.speech.attachment_deliverer import AttachmentAudioDeliverer
+from src.interface.channel_router import ChannelRouter
+from src.interface.channel_manager import ChannelManager
 
 from src.plugins import get_plugins
 
@@ -44,10 +48,16 @@ class GroupAccountabilityBot(commands.Bot):
 
         # Shared core infrastructure
         self.db_manager = DatabaseManager(settings.database_path)
+        self.db_manager.register_plugin_schema("core", CORE_SCHEMA)
         self.speech_synthesizer = (
             EspeakSpeechSynthesizer(settings.tts_binary) if settings.tts_enabled else None
         )
         self.audio_deliverer = AttachmentAudioDeliverer() if settings.tts_enabled else None
+
+        # Shared channel infrastructure (cross-plugin)
+        self.channel_binding_repo = SQLiteChannelBindingRepository(settings.database_path)
+        self.channel_router = ChannelRouter(self, self.channel_binding_repo)
+        self.channel_manager = ChannelManager(self, self.channel_router)
 
         # Plugin runtime: every feature self-registers schema, services, and cogs
         self.plugins = {}
