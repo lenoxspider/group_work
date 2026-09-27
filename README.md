@@ -1,6 +1,6 @@
 # 🤖 Group Accountability Discord Bot
 
-A clean-architecture Discord bot engineered to eliminate free-riding and miscommunication in student teams through automated task tracking, deadline countdowns, multi-tier T-minus alerts, objective contribution reporting, and verified deliverable archiving.
+A clean-architecture Discord bot engineered to eliminate free-riding and miscommunication in student teams through automated task tracking, deadline countdowns, multi-tier T-minus alerts, objective contribution reporting, verified deliverable archiving, a spi economy, and an entry-fee Squid Game arena.
 
 ---
 
@@ -11,6 +11,7 @@ This project strictly adheres to Domain-Driven Design (DDD) and Clean Architectu
 - **`src/application/`**: Use cases and orchestration services (`TaskService`, `DeadlineService`, `ActivityService`, `VaultService`) and typed Data Transfer Objects (DTOs).
 - **`src/infrastructure/`**: Asynchronous SQLite repositories (`aiosqlite`), database connection and schema lifecycle, and local file storage vault.
 - **`src/interface/`**: Discord Bot client, presentation formatters (`discord_formatters.py`), and Cogs (`tasks_cog.py`, `deadlines_cog.py`, `reports_cog.py`, `tracker_cog.py`, `admin_cog.py`). Command handlers do exactly three things: parse input → call application service → serialize Discord response.
+- **`src/plugins/`**: Self-contained feature modules (`bank`, `groupwork`, `radio`, `society`, `games`). Each plugin owns its schema, services, and cogs, registers itself into the bot runtime, and wires cross-plugin dependencies (e.g. the games arena escrows spi through the bank).
 - **`src/config/`**: Strongly typed, validated `Settings` loaded once from environment variables.
 
 ---
@@ -113,6 +114,22 @@ This project strictly adheres to Domain-Driven Design (DDD) and Clean Architectu
 ### 7. 🚀 Project / Sprint Lifecycle (`/project`)
 - **`/project status`**: Displays an active project health dashboard showing completion rates, open tasks, files submitted, and the next upcoming milestone.
 - **`/project finish`**: Concludes the project sprint, updates channel topics to `[ARCHIVED]`, preserves channels in read-only mode, and posts a comprehensive **Final Project Retrospective & Contribution Report** to `#submissions`.
+
+### 8. 🎮 Games Arena (Squid Game Events)
+A self-contained arena where the team plays entry-fee elimination games for the spi pot. The arena is game-agnostic: survivors fight for the escrowed pot, and games register as modules (currently just Round 1).
+
+- **Channels**: `#game-hub` (active players) and `#spectators` (eliminated contestants).
+- **Commands**:
+  - `/event open [entry_fee:<int>]` - open registration for a new event. Entry fee defaults to `100 spi`.
+  - `/event join` - pay the entry fee and claim a player number (`001`-`456`).
+  - `/event start` - lock registration and begin **Round 1: Red Light Green Light**.
+  - `/event status` - the escrowed pot, survivor count, and current game.
+  - `/event vote <continue|stop>` - surviving players vote between rounds (scaffolded for when later games land).
+  - `/event conclude` - resolve the event and pay out the pot.
+  - `/move` - advance in Red Light Green Light (safe only during `GREEN LIGHT`, or tap the MOVE button).
+- **Economy (zero-inflation escrow)**: entry fees transfer into a `POT` account in the bank (tax-exempt). No minting or burning - the pot is just the sum of entry fees, paid out on conclusion. Last survivor takes all, or the survivors split it evenly. On total extinction the pot carries to the next event.
+- **Red Light Green Light (Round 1)**: a 5-round, timed state machine. Move on green, freeze on red. Move during red light (outside the 0.5s latency grace window) or fail to cross the 100m line before time expires, and you're eliminated with guard voice (`Player zero six seven. Eliminated.`).
+- **Decoupled from accountability**: games never touch your homework. Overdue tasks hit your spi balance and the Wall of Shame, never the arena.
 
 ---
 
