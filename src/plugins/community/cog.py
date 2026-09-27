@@ -309,7 +309,12 @@ class CommunityCog(commands.Cog, name="Community"):
                 pass
 
         status_display = "🐱 Catizen" if member.status == CATIZEN else "🗳️ Citizen"
-        intro = "✅ done" if member.intro_done else "⏳ pending (post in #new-recruits)"
+        if member.intro_done:
+            intro = "✅ done"
+        elif member.intro_task_id:
+            intro = "⏳ pending (post in #new-recruits)"
+        else:
+            intro = "—"
 
         embed = discord.Embed(title=f"Identity of {interaction.user.display_name}", color=PINK)
         embed.add_field(name="Membership", value=f"**{status_display}**", inline=True)
