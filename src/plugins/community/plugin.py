@@ -1,4 +1,4 @@
-"""Community feature plugin - onboarding and the constitution gate."""
+"""Community feature plugin - onboarding, the constitution, and the tribunal."""
 
 from src.interface.channel_manager import ChannelDecl
 from src.plugins.base import Plugin
@@ -11,10 +11,13 @@ from src.plugins.community.service import CommunityService
 class CommunityPlugin(Plugin):
     name = "community"
     title = "🐱 Community & Membership"
-    summary = "Join, sign the constitution, and earn citizenship (and your vote)."
+    summary = "Join, sign the constitution, earn citizenship - and judge your comrades in the court."
     guide = [
         ("/join", "Sign the constitution and become a citizen (unlocks voting)"),
         ("/me", "Your membership status, intro task, and wallet"),
+        ("/court accuse · vote · defend · evidence", "The tribunal - bring a charge, judge it, present the record"),
+        ("/court close · appeal · case · docket", "Rule a case, appeal a conviction, read the docket"),
+        ("/citizens setup · announce", "[Admin] Enroll existing members, post the founding proclamation"),
     ]
     schema = COMMUNITY_SCHEMA
     migrations = []
