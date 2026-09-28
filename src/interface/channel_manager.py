@@ -96,6 +96,20 @@ def _policy_bot_log(guild: discord.Guild) -> Dict:
     return {guild.default_role: _private(), guild.me: _bot_full()}
 
 
+def _policy_pulse(guild: discord.Guild) -> Dict:
+    """#pulse: everyone can see, react, and send (reflex pulses need both)."""
+    return {
+        guild.default_role: discord.PermissionOverwrite(
+            view_channel=True,
+            read_message_history=True,
+            send_messages=True,
+            add_reactions=True,
+            use_application_commands=True,
+        ),
+        guild.me: _bot_full(),
+    }
+
+
 def _policy_court(guild: discord.Guild) -> Dict:
     """#tribunal: public read + react (jury votes), no free chat, commands allowed."""
     return {
@@ -131,6 +145,7 @@ POLICIES = {
     "bot-log": _policy_bot_log,
     "recruits": _policy_recruits,
     "court": _policy_court,
+    "pulse": _policy_pulse,
 }
 
 
