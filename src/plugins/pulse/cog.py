@@ -14,6 +14,7 @@ from src.plugins.pulse.domain import (
     SILENCE_MINUTES,
     utcnow,
 )
+from src.plugins.pulse.modules import normalize
 from src.plugins.pulse.service import PulseService
 
 logger = logging.getLogger("plugins.pulse.cog")
@@ -46,7 +47,22 @@ class PulseCog(commands.Cog, name="Pulse"):
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
-        self._last_activity[str(message.guild.id)] = utcnow()
+        gid = str(message.guild.id)
+        self._last_activity[gid] = utcnow()
+
+        pulse = self.service.active_pulse(gid)
+        if not pulse or pulse.mode != "message":
+            return
+        if str(message.channel.id) != pulse.channel_id:
+            return
+        if normalize(message.content) not in pulse.accept:
+            return
+        self.service.clear(gid)
+        await self.service.grant(gid, str(message.author.id))
+        try:
+            await message.reply(f"🏆 Credited — **+{PULSE_PRIZE_SPI} spi** · win *{pulse.label}*.")
+        except Exception:
+            pass
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
@@ -93,7 +109,7 @@ class PulseCog(commands.Cog, name="Pulse"):
                     ch = self.bot.get_channel(int(pulse.channel_id))
                     if ch:
                         try:
-                            await ch.send(f"⌛ **{pulse.label}** expired — no one was quick enough.")
+                            await ch.send(f"⌛ **{pulse.label}** expired — the answer was **{pulse.answer}**.")
                         except Exception:
                             pass
                 continue

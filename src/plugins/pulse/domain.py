@@ -25,6 +25,7 @@ class ActivePulse:
     answer: str
     mode: str
     started_at: datetime
+    accept: tuple = ()
 
     def is_expired(self, now: Optional[datetime] = None) -> bool:
         now = now or utcnow()

@@ -55,6 +55,7 @@ class PulseService:
             answer=spec["answer"],
             mode=spec["mode"],
             started_at=utcnow(),
+            accept=tuple(spec.get("accept", [])),
         )
         self.active[guild_id] = pulse
         await self.repo.set_last_fired(guild_id, utcnow().isoformat())
