@@ -26,6 +26,8 @@ from src.application.dtos.task_dtos import (
 )
 from src.application.interfaces.ledger import Ledger
 
+INTRO_TASK_DESCRIPTION = "Introduce yourself in #new-recruits"
+
 class TaskService:
     """Orchestrates task assignments, completions, and reminders."""
 
@@ -164,6 +166,8 @@ class TaskService:
         actions: List[OverdueShameActionDTO] = []
 
         for task in overdue_tasks:
+            if task.description == INTRO_TASK_DESCRIPTION:
+                continue  # onboarding intro - reminded, never publicly shamed
             # Break on-time streak
             await self._activity_repo.reset_streak(task.guild_id, task.assigned_to)
             hours_diff = max(1, int((current_time - task.due_date).total_seconds() // 3600))

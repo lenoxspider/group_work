@@ -13,6 +13,7 @@ class CommunityPlugin(Plugin):
     title = "🐱 Community & Membership"
     summary = "Join, sign the constitution, earn citizenship - and judge your comrades in the court."
     guide = [
+        ("/intro", "Introduce yourself - four questions, completes Task #1 (+50 spi)"),
         ("/join", "Sign the constitution and become a citizen (unlocks voting)"),
         ("/me", "Your membership status, intro task, and wallet"),
         ("/court accuse · vote · defend · evidence", "The tribunal - bring a charge, judge it, present the record"),

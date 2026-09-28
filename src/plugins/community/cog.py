@@ -19,6 +19,7 @@ from src.plugins.community.domain import (
     CITIZEN,
     Case,
 )
+from src.plugins.community.intro import IntroSession, StartIntroView, intro_embed, intro_view
 from src.plugins.community.service import CommunityService
 
 logger = logging.getLogger("plugins.community.cog")
@@ -68,6 +69,7 @@ class CommunityCog(commands.Cog, name="Community"):
         self.bot = bot
         self.service = service
         self.channel_router = channel_router
+        self._intro = {}
         self.court_loop.start()
 
     citizens = app_commands.Group(name="citizens", description="Membership administration")
@@ -75,6 +77,9 @@ class CommunityCog(commands.Cog, name="Community"):
 
     def cog_unload(self):
         self.court_loop.cancel()
+
+    async def cog_load(self):
+        self.bot.add_view(StartIntroView(self))
 
     # --- Channel helpers ---
 
@@ -124,68 +129,120 @@ class CommunityCog(commands.Cog, name="Community"):
         embed = discord.Embed(
             title="🐱 A catizen has wandered in",
             description=(
-                f"**{member.display_name}** just joined, and is a **catizen** until they "
-                "sign the constitution.\n\n"
-                "Two steps to become a citizen:\n"
-                "• Post an intro here - that's Task #1 (pays 50 spi)\n"
-                "• Run `/join` to sign the constitution and unlock voting"
+                f"**{member.display_name}**, you've joined the collective as a **catizen**.\n\n"
+                "**Two steps to become a citizen:**\n"
+                "1. Press **Begin your introduction** below - four quick questions, and that's "
+                "Task #1 (pays **50 spi**)\n"
+                "2. Run `/join` to sign the constitution and unlock voting"
             ),
             color=PINK,
         )
         if ch:
             try:
-                await ch.send(content=member.mention, embed=embed)
+                await ch.send(content=member.mention, embed=embed, view=StartIntroView(self))
             except Exception as e:
                 logger.warning("Could not welcome %s: %s", user_id, e)
 
         try:
             await member.send(
                 "Welcome to the collective, catizen 🐱\n\n"
-                "Two steps to become a citizen:\n"
-                "1. Post a quick intro in #new-recruits - that's Task #1, and it pays 50 spi.\n"
+                "**Two steps to become a citizen:**\n"
+                "1. In #new-recruits, press **Begin your introduction** - four quick questions, "
+                "and Task #1 is done (pays 50 spi).\n"
                 "2. Run `/join` to sign the constitution and unlock voting.\n\n"
                 "`/guide` lists every command. `/me` shows your standing."
             )
         except Exception:
             pass
 
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message):
-        if message.author.bot or not message.guild:
-            return
-        if message.channel.name != "new-recruits":
-            return
-        guild_id = str(message.guild.id)
-        user_id = str(message.author.id)
-        member = await self.service.get_member(guild_id, user_id)
-        if member.intro_done or not member.intro_task_id:
-            return
-        await self.service.complete_intro(guild_id, user_id)
-        try:
-            await message.add_reaction("🎖️")
-        except Exception:
-            pass
-        try:
-            await message.channel.send(
-                f"🎖️ **{message.author.display_name}** completed Task #1 (their intro). +50 spi."
-            )
-        except Exception:
-            pass
+    # --- Prompted introduction ---
 
-        hall = await self._town_hall_channel(message.guild)
+    async def begin_intro(self, interaction: discord.Interaction):
+        if not interaction.guild:
+            await interaction.response.send_message("Introduce yourself inside the server.", ephemeral=True)
+            return
+        guild_id = str(interaction.guild_id)
+        user_id = str(interaction.user.id)
+        member = await self.service.get_member(guild_id, user_id)
+        done_msg = "You've already introduced yourself. Welcome, comrade."
+        if member.intro_done or not member.intro_task_id:
+            if interaction.response.is_done():
+                await interaction.followup.send(done_msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(done_msg, ephemeral=True)
+            return
+
+        session = IntroSession(user_id, interaction.user.display_name)
+        self._intro[user_id] = session
+        embed = intro_embed(session)
+        view = intro_view(self, session)
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    async def intro_advance(self, interaction: discord.Interaction, session: IntroSession, from_modal: bool = False):
+        if session.done:
+            await self.intro_finish(interaction, session, from_modal)
+            return
+        embed = intro_embed(session)
+        view = intro_view(self, session)
+        if from_modal:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        else:
+            await interaction.response.edit_message(embed=embed, view=view)
+
+    async def intro_finish(self, interaction: discord.Interaction, session: IntroSession, from_modal: bool):
+        guild = interaction.guild
+        user_id = session.user_id
+        try:
+            completed = await self.service.complete_intro(str(guild.id), user_id)
+        except Exception as e:
+            logger.warning("Intro completion failed for %s: %s", user_id, e)
+            completed = None
+        self._intro.pop(user_id, None)
+
+        answers = session.answers + [""] * (4 - len(session.answers))
+        nr = await self._new_recruits_channel(guild)
+        if nr:
+            embed = discord.Embed(title="🎖️ A comrade presents themselves", color=PINK)
+            embed.description = f"<@{user_id}> has introduced themselves to the collective."
+            embed.add_field(name="Known as", value=answers[0] or "—", inline=True)
+            embed.add_field(name="Brings", value=answers[1] or "—", inline=True)
+            embed.add_field(name="Came to", value=answers[2] or "—", inline=True)
+            embed.add_field(name="Bears the mark", value=answers[3] or "—", inline=True)
+            embed.set_footer(text="Task #1 complete · +50 spi" if completed else "Introduction recorded.")
+            try:
+                await nr.send(content=f"<@{user_id}>", embed=embed)
+            except Exception as e:
+                logger.warning("Could not post compiled intro: %s", e)
+
+        hall = await self._town_hall_channel(guild)
         if hall:
             try:
-                embed = discord.Embed(
-                    title="🎖️ A new comrade arrives",
-                    description=(
-                        f"Everyone welcome **{message.author.mention}** - they've completed "
-                        "their intro and are earning their way in."
-                    ),
+                await hall.send(embed=discord.Embed(
+                    description=f"🎖️ Everyone welcome <@{user_id}> - a new comrade has presented themselves.",
                     color=PINK,
-                )
-                await hall.send(embed=embed)
-            except Exception as e:
-                logger.warning("Could not post welcome-bridge to #town-hall: %s", e)
+                ))
+            except Exception:
+                pass
+
+        final = (
+            "✅ **Introduction complete.** Task #1 cleared"
+            + (" (+50 spi)" if completed else "")
+            + ". Now run `/join` to sign the constitution and become a citizen."
+        )
+        if from_modal:
+            await interaction.response.send_message(final, ephemeral=True)
+        else:
+            try:
+                await interaction.response.edit_message(content=final, embed=None, view=None)
+            except Exception:
+                await interaction.response.edit_message(content=final, view=None)
+
+    @app_commands.command(name="intro", description="Introduce yourself to the collective (catizens)")
+    async def intro_cmd(self, interaction: discord.Interaction):
+        await self.begin_intro(interaction)
 
     # --- Tribunal reaction voting ---
 
@@ -312,7 +369,7 @@ class CommunityCog(commands.Cog, name="Community"):
         if member.intro_done:
             intro = "✅ done"
         elif member.intro_task_id:
-            intro = "⏳ pending (post in #new-recruits)"
+            intro = "⏳ pending (/intro)"
         else:
             intro = "—"
 

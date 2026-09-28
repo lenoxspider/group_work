@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from src.application.dtos.task_dtos import CreateTaskDTO
+from src.application.services.task_service import INTRO_TASK_DESCRIPTION
 from src.domain.errors import ValidationError
 from src.plugins.community.domain import (
     CASE_ACQUITTED,
@@ -26,7 +27,6 @@ from src.plugins.community.repository import SQLiteCommunityRepository
 
 logger = logging.getLogger("plugins.community.service")
 
-INTRO_TASK_DESCRIPTION = "Introduce yourself in #new-recruits"
 INTRO_TASK_DUE_DAYS = 7
 
 
