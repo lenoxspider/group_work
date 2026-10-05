@@ -68,6 +68,9 @@ class CommunityService:
         member = await self.repo.get_member(guild_id, user_id)
         return bool(member and member.status == CITIZEN)
 
+    async def list_citizens(self, guild_id: str) -> list[str]:
+        return await self.repo.list_citizens(guild_id)
+
     async def on_join(self, guild_id: str, user_id: str) -> Optional[Member]:
         existing = await self.repo.get_member(guild_id, user_id)
         if existing:

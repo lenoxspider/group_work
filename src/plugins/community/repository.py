@@ -52,6 +52,13 @@ class SQLiteCommunityRepository:
                 row = await cur.fetchone()
                 return self._row_to_member(row) if row else None
 
+    async def list_citizens(self, guild_id: str) -> List[str]:
+        query = "SELECT user_id FROM member_registry WHERE guild_id = ? AND status = ?"
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(query, (guild_id, CITIZEN)) as cur:
+                rows = await cur.fetchall()
+                return [r[0] for r in rows]
+
     async def sign(self, guild_id: str, user_id: str, signed_at: str) -> None:
         query = "UPDATE member_registry SET status = ?, signed_at = ? WHERE guild_id = ? AND user_id = ?"
         async with aiosqlite.connect(self.db_path) as db:

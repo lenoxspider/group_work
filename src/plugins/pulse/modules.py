@@ -1,16 +1,28 @@
 """Pulse modules - each one is a short, one-action moment.
 
-A module builds a pulse spec: {kind, label, mode, embed, content, answer,
-accept, reactions}.
+A module builder is async and receives (community, guild_id). It returns a
+pulse spec dict, or None when the module cannot run right now (the engine then
+falls through to the next module).
 
-- mode "reaction": first person to react with `answer` wins.
-- mode "message": first person whose chat message normalizes into `accept` wins.
+Modes:
+- "reaction": first person to react with `answer` wins.
+- "message": first person whose chat message normalizes into `accept` wins.
+- "vote": reactions are ballots; the engine tallies at expiry and resolves.
 """
 
 import random
 import re
+from typing import Optional
 
 import discord
+
+from src.plugins.pulse.domain import (
+    SNAP_COMPENSATION_SPI,
+    SNAP_FINE_SPI,
+    SNAP_GUILTY_EMOJI,
+    SNAP_INNOCENT_EMOJI,
+    SNAP_TIMEOUT_SECONDS,
+)
 
 PINK = discord.Color.from_rgb(255, 0, 144)
 
@@ -31,7 +43,7 @@ _GRID = 25
 _COLS = 5
 
 
-def _odd_one_out() -> dict:
+async def _odd_one_out(community, guild_id) -> dict:
     base, odd = random.choice(_ODD_PAIRS)
     cells = [base] * _GRID
     cells[random.randrange(_GRID)] = odd
@@ -75,7 +87,7 @@ _RIDDLES = [
 ]
 
 
-def _cipher_sprint() -> dict:
+async def _cipher_sprint(community, guild_id) -> dict:
     r = random.choice(_RIDDLES)
     accept = [normalize(r["a"])] + [normalize(x) for x in r.get("aliases", [])]
     embed = discord.Embed(
@@ -95,8 +107,72 @@ def _cipher_sprint() -> dict:
     }
 
 
-MODULES = [_odd_one_out, _cipher_sprint]
+# --- Snap Trial ---
+
+_CRIMES = [
+    "excessive lounging during work hours",
+    "hoarding snacks from the common room",
+    "speaking ill of the Front Man",
+    "plotting to defect to the spectators",
+    "dancing without a permit",
+    "wasting the collective's time with riddles",
+    "wearing the wrong color on game day",
+    "embezzling crumbs from the treasury",
+    "consorting with the masked guards",
+    "falsifying a task completion",
+    "unauthorized napping in the dormitory",
+    "spreading rumors about the VIP room",
+]
 
 
-def build_random() -> dict:
-    return random.choice(MODULES)()
+async def _snap_trial(community, guild_id) -> Optional[dict]:
+    if not community:
+        return None
+    try:
+        citizens = await community.list_citizens(guild_id)
+    except Exception:
+        return None
+    if not citizens:
+        return None
+    accused_id = random.choice(citizens)
+    crime = random.choice(_CRIMES)
+    embed = discord.Embed(
+        title="⚖️ SNAP TRIAL",
+        description=(
+            f"**<@{accused_id}>** stands accused of **{crime}**.\n\n"
+            "Comrades, cast your verdict:\n"
+            f"{SNAP_GUILTY_EMOJI} **GUILTY**    {SNAP_INNOCENT_EMOJI} **INNOCENT**\n\n"
+            f"*Voting closes in 5 minutes. Simple majority rules.*\n"
+            f"*Guilty pays {SNAP_FINE_SPI} spi to the treasury; innocent earns {SNAP_COMPENSATION_SPI} spi.*"
+        ),
+        color=PINK,
+    )
+    return {
+        "kind": "snap_trial",
+        "label": "Snap Trial",
+        "mode": "vote",
+        "embed": embed,
+        "content": None,
+        "answer": "",
+        "accept": (),
+        "reactions": [SNAP_GUILTY_EMOJI, SNAP_INNOCENT_EMOJI],
+        "vote_options": {SNAP_GUILTY_EMOJI: "guilty", SNAP_INNOCENT_EMOJI: "innocent"},
+        "timeout_seconds": SNAP_TIMEOUT_SECONDS,
+        "data": {"accused_id": accused_id, "crime": crime},
+    }
+
+
+MODULES = [_odd_one_out, _cipher_sprint, _snap_trial]
+
+
+async def build_random(community, guild_id) -> Optional[dict]:
+    builders = list(MODULES)
+    random.shuffle(builders)
+    for builder in builders:
+        try:
+            spec = await builder(community, guild_id)
+        except Exception:
+            spec = None
+        if spec:
+            return spec
+    return None

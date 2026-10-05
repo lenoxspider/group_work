@@ -109,7 +109,12 @@ class PulseCog(commands.Cog, name="Pulse"):
                     ch = self.bot.get_channel(int(pulse.channel_id))
                     if ch:
                         try:
-                            await ch.send(f"⌛ **{pulse.label}** expired — the answer was **{pulse.answer}**.")
+                            if pulse.mode == "vote":
+                                msg = await ch.fetch_message(int(pulse.message_id))
+                                result = await self.service.resolve_vote(pulse, msg)
+                                await ch.send(result["text"])
+                            else:
+                                await ch.send(f"⌛ **{pulse.label}** expired — the answer was **{pulse.answer}**.")
                         except Exception:
                             pass
                 continue

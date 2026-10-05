@@ -36,6 +36,9 @@ class PulsePlugin(Plugin):
         bank = registry.get("bank")
         if bank:
             self.service.attach_bank(bank.service)
+        community = registry.get("community")
+        if community:
+            self.service.attach_community(community.service)
 
     def build_cogs(self, bot) -> list:
         return [PulseCog(bot, self.service, channel_router=bot.channel_router)]
