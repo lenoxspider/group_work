@@ -103,7 +103,7 @@ GROUPWORK_SCHEMA = [
     """,
     """
     CREATE TABLE IF NOT EXISTS alert_fires (
-        task_id INTEGER NOT NULL,
+        task_id TEXT NOT NULL,
         alert_tier TEXT NOT NULL,
         fired_at TEXT NOT NULL,
         PRIMARY KEY (task_id, alert_tier)

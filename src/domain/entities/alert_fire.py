@@ -15,6 +15,6 @@ from datetime import datetime
 @dataclass(frozen=True)
 class AlertFire:
     """Represents a recorded alert trigger preventing duplicate fires across restarts."""
-    task_id: int
+    task_id: str
     alert_tier: str
     fired_at: datetime

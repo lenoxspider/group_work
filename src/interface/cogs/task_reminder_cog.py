@@ -71,36 +71,41 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
         try:
             actions = await self.service.evaluate_overdue_tasks(now)
             for act in actions:
-                guild = self.bot.get_guild(int(act.guild_id))
-                if not guild:
-                    continue
+                # One malformed task must never silence the wall for everyone else.
+                try:
+                    guild = self.bot.get_guild(int(act.guild_id))
+                    if not guild:
+                        continue
 
-                # Idempotency check for DELINQUENT penalty
-                raw_id = int(act.task_id.split("-")[-1]) if "-" in act.task_id else int(act.task_id)
-                fire_record = AlertFire(task_id=raw_id, alert_tier="DELINQUENT", fired_at=now)
-                first_fire = await self.alert_fire_repo.record_fire(fire_record)
-                if not first_fire:
-                    continue
+                    # Idempotency check for DELINQUENT penalty
+                    fire_record = AlertFire(task_id=act.task_id, alert_tier="DELINQUENT", fired_at=now)
+                    first_fire = await self.alert_fire_repo.record_fire(fire_record)
+                    if not first_fire:
+                        continue
 
-                shame_ch = await self.channel_router.get(guild, "wall-of-shame")
-                allowed_mentions = discord.AllowedMentions(users=True, roles=False, everyone=False)
-                if shame_ch:
-                    embed = build_wall_of_shame_embed(act)
-                    v_script = self.voice_service.generate_task_reminder_script(
-                        act.task_id, act.description, f"<@{act.user_id}>", hours_overdue=act.hours_overdue
-                    ) if self.voice_service else ""
-                    v_file = await self._try_generate_voice_file(v_script, act.user_id) if v_script else None
-                    try:
-                        await shame_ch.send(
-                            content=f"🚨 **WALL OF SHAME ALERT:** <@{act.user_id}>",
-                            embed=embed,
-                            file=v_file,
-                            allowed_mentions=allowed_mentions
-                        )
-                    except Exception as e:
-                        logger.warning("Could not post to #wall-of-shame in guild %s: %s", guild.id, e)
+                    shame_ch = await self.channel_router.get(guild, "wall-of-shame")
+                    allowed_mentions = discord.AllowedMentions(users=True, roles=False, everyone=False)
+                    if shame_ch:
+                        embed = build_wall_of_shame_embed(act)
+                        v_script = self.voice_service.generate_task_reminder_script(
+                            act.task_id, act.description, f"<@{act.user_id}>", hours_overdue=act.hours_overdue
+                        ) if self.voice_service else ""
+                        v_file = await self._try_generate_voice_file(v_script, act.user_id) if v_script else None
+                        try:
+                            await shame_ch.send(
+                                content=f"🚨 **WALL OF SHAME ALERT:** <@{act.user_id}>",
+                                embed=embed,
+                                file=v_file,
+                                allowed_mentions=allowed_mentions
+                            )
+                        except Exception as e:
+                            logger.warning("Could not post to #wall-of-shame in guild %s: %s", guild.id, e)
 
-                await self.service.acknowledge_shame(act.task_id)
+                    await self.service.acknowledge_shame(act.task_id)
+                except Exception as e:
+                    logger.error(
+                        "Wall of shame dispatch failed for %s: %s", act.task_id, e, exc_info=True
+                    )
         except Exception as e:
             logger.error("Error in wall of shame dispatch: %s", e, exc_info=True)
 
@@ -111,71 +116,77 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
             now = datetime.now(timezone.utc)
             actions = await self.service.evaluate_pending_reminders(now)
             for act in actions:
-                # Idempotency check: prevent duplicate reminders on reboot
-                raw_id = int(act.task_id.split("-")[-1]) if "-" in act.task_id else int(act.task_id)
-                fire_record = AlertFire(task_id=raw_id, alert_tier=act.reminder_tier, fired_at=now)
-                first_fire = await self.alert_fire_repo.record_fire(fire_record)
-                if not first_fire:
-                    continue
-
-                abs_ts, rel_ts = format_discord_timestamps(act.due_date)
-
-                # Tier 2 (T-6h): Channel Escalation Ping
-                if act.reminder_tier == "6h":
-                    guild = self.bot.get_guild(int(act.guild_id))
-                    if guild:
-                        tasks_ch = await self.channel_router.get(guild, "tasks")
-                        if tasks_ch:
-                            embed = discord.Embed(
-                                title=f"⚠️ Escalation Alert (T-6h): {act.task_id}",
-                                description=f"Task **{act.description}** assigned to <@{act.user_id}> is due in under 6 hours!\n\n**Deadline:** {abs_ts} ({rel_ts})",
-                                color=COLOR_WARNING,
-                                timestamp=now
-                            )
-                            embed.set_footer(text=f"Complete: /task complete {act.task_id} • Or request extension: /task extend")
-                            try:
-                                await tasks_ch.send(content=f"⚠️ Attention <@{act.user_id}>:", embed=embed)
-                            except Exception:
-                                pass
-                    await self.service.acknowledge_reminder(act.task_id, act.reminder_tier)
-                    continue
-
-                # Tier 1 (T-24h) & Tier 3 (T-1h): Direct Message
-                if self.preference_service:
-                    is_quiet = await self.preference_service.is_in_quiet_hours(act.guild_id, act.user_id, now)
-                    if is_quiet:
-                        logger.info("Suppressing DM reminder for user %s during quiet hours", act.user_id)
-                        continue
-
-                user = self.bot.get_user(int(act.user_id))
-                if not user:
-                    try:
-                        user = await self.bot.fetch_user(int(act.user_id))
-                    except Exception:
-                        continue
-
-                color = COLOR_DANGER if act.reminder_tier == "1h" else COLOR_WARNING
-                title = f"{'🚨 Urgent ' if act.reminder_tier == '1h' else '⏰ '}Task Reminder: {act.task_id}"
-
-                embed = discord.Embed(
-                    title=title,
-                    description=f"Your task **{act.description}** is due {rel_ts}.\n\n**Deadline:** {abs_ts}",
-                    color=color,
-                    timestamp=now
-                )
-                embed.set_footer(text=f"Complete: /task complete {act.task_id} • Request extension: /task extend")
-                v_file = None
-                if self.voice_service and act.reminder_tier == "1h":
-                    v_script = self.voice_service.generate_task_reminder_script(
-                        act.task_id, act.description, user.display_name, is_urgent=True
-                    )
-                    v_file = await self._try_generate_voice_file(v_script, act.user_id)
-
+                # One malformed task must never silence the ladder for everyone else.
                 try:
-                    await user.send(embed=embed, file=v_file)
-                    await self.service.acknowledge_reminder(act.task_id, act.reminder_tier)
+                    # Idempotency check: prevent duplicate reminders on reboot
+                    fire_record = AlertFire(task_id=act.task_id, alert_tier=act.reminder_tier, fired_at=now)
+                    first_fire = await self.alert_fire_repo.record_fire(fire_record)
+                    if not first_fire:
+                        continue
+
+                    abs_ts, rel_ts = format_discord_timestamps(act.due_date)
+
+                    # Tier 2 (T-6h): Channel Escalation Ping
+                    if act.reminder_tier == "6h":
+                        guild = self.bot.get_guild(int(act.guild_id))
+                        if guild:
+                            tasks_ch = await self.channel_router.get(guild, "tasks")
+                            if tasks_ch:
+                                embed = discord.Embed(
+                                    title=f"⚠️ Escalation Alert (T-6h): {act.task_id}",
+                                    description=f"Task **{act.description}** assigned to <@{act.user_id}> is due in under 6 hours!\n\n**Deadline:** {abs_ts} ({rel_ts})",
+                                    color=COLOR_WARNING,
+                                    timestamp=now
+                                )
+                                embed.set_footer(text=f"Complete: /task complete {act.task_id} • Or request extension: /task extend")
+                                try:
+                                    await tasks_ch.send(content=f"⚠️ Attention <@{act.user_id}>:", embed=embed)
+                                except Exception:
+                                    pass
+                        await self.service.acknowledge_reminder(act.task_id, act.reminder_tier)
+                        continue
+
+                    # Tier 1 (T-24h) & Tier 3 (T-1h): Direct Message
+                    if self.preference_service:
+                        is_quiet = await self.preference_service.is_in_quiet_hours(act.guild_id, act.user_id, now)
+                        if is_quiet:
+                            logger.info("Suppressing DM reminder for user %s during quiet hours", act.user_id)
+                            continue
+
+                    user = self.bot.get_user(int(act.user_id))
+                    if not user:
+                        try:
+                            user = await self.bot.fetch_user(int(act.user_id))
+                        except Exception:
+                            continue
+
+                    color = COLOR_DANGER if act.reminder_tier == "1h" else COLOR_WARNING
+                    title = f"{'🚨 Urgent ' if act.reminder_tier == '1h' else '⏰ '}Task Reminder: {act.task_id}"
+
+                    embed = discord.Embed(
+                        title=title,
+                        description=f"Your task **{act.description}** is due {rel_ts}.\n\n**Deadline:** {abs_ts}",
+                        color=color,
+                        timestamp=now
+                    )
+                    embed.set_footer(text=f"Complete: /task complete {act.task_id} • Request extension: /task extend")
+                    v_file = None
+                    if self.voice_service and act.reminder_tier == "1h":
+                        v_script = self.voice_service.generate_task_reminder_script(
+                            act.task_id, act.description, user.display_name, is_urgent=True
+                        )
+                        v_file = await self._try_generate_voice_file(v_script, act.user_id)
+
+                    try:
+                        await user.send(embed=embed, file=v_file)
+                        await self.service.acknowledge_reminder(act.task_id, act.reminder_tier)
+                    except Exception as e:
+                        logger.warning("Could not DM reminder to user %s: %s", act.user_id, e)
                 except Exception as e:
-                    logger.warning("Could not DM reminder to user %s: %s", act.user_id, e)
+                    logger.error(
+                        "Reminder dispatch failed for %s (tier %s): %s",
+                        act.task_id, act.reminder_tier, e, exc_info=True,
+                    )
 
             # Check and post overdue tasks to the Wall of Shame
             await self._dispatch_wall_of_shame(now)
