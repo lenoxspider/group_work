@@ -99,3 +99,25 @@ class StartIntroView(discord.ui.View):
     @discord.ui.button(label="Begin your introduction", style=discord.ButtonStyle.success, custom_id="intro:start")
     async def start(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.begin_intro(interaction)
+
+
+class SignConstitutionView(discord.ui.View):
+    """Persistent one-click path from catizen to citizen.
+
+    The old flow ended the introduction with an ephemeral line saying "now run
+    /join", which vanished and left members stranded as catizens. A durable
+    button removes that dead end.
+    """
+
+    def __init__(self, cog):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(
+        label="Sign the constitution",
+        style=discord.ButtonStyle.primary,
+        custom_id="community:sign",
+        emoji="🗳️",
+    )
+    async def sign(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.sign_from_button(interaction)

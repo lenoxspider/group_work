@@ -19,6 +19,9 @@ COURT_VOTE_WINDOW_HOURS = 24
 COURT_APPEAL_WINDOW_HOURS = 12
 COURT_FALSE_WITNESS_FINE = 25
 
+# Onboarding
+CITIZEN_STIPEND_SPI = 100      # paid once on signing, so a new citizen can actually play
+
 
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")

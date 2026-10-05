@@ -17,9 +17,16 @@ from src.plugins.community.domain import (
     CASE_OPEN,
     CATIZEN,
     CITIZEN,
+    CITIZEN_STIPEND_SPI,
     Case,
 )
-from src.plugins.community.intro import IntroSession, StartIntroView, intro_embed, intro_view
+from src.plugins.community.intro import (
+    IntroSession,
+    SignConstitutionView,
+    StartIntroView,
+    intro_embed,
+    intro_view,
+)
 from src.plugins.community.service import CommunityService
 
 logger = logging.getLogger("plugins.community.cog")
@@ -80,6 +87,7 @@ class CommunityCog(commands.Cog, name="Community"):
 
     async def cog_load(self):
         self.bot.add_view(StartIntroView(self))
+        self.bot.add_view(SignConstitutionView(self))
 
     # --- Channel helpers ---
 
@@ -213,7 +221,7 @@ class CommunityCog(commands.Cog, name="Community"):
             embed.add_field(name="Bears the mark", value=answers[3] or "—", inline=True)
             embed.set_footer(text="Task #1 complete · +50 spi" if completed else "Introduction recorded.")
             try:
-                await nr.send(content=f"<@{user_id}>", embed=embed)
+                await nr.send(content=f"<@{user_id}>", embed=embed, view=SignConstitutionView(self))
             except Exception as e:
                 logger.warning("Could not post compiled intro: %s", e)
 
@@ -230,15 +238,16 @@ class CommunityCog(commands.Cog, name="Community"):
         final = (
             "✅ **Introduction complete.** Task #1 cleared"
             + (" (+50 spi)" if completed else "")
-            + ". Now run `/join` to sign the constitution and become a citizen."
+            + ". One step left - sign below to become a **citizen**."
         )
+        sign_view = SignConstitutionView(self)
         if from_modal:
-            await interaction.response.send_message(final, ephemeral=True)
+            await interaction.response.send_message(final, ephemeral=True, view=sign_view)
         else:
             try:
-                await interaction.response.edit_message(content=final, embed=None, view=None)
+                await interaction.response.edit_message(content=final, embed=None, view=sign_view)
             except Exception:
-                await interaction.response.edit_message(content=final, view=None)
+                await interaction.response.edit_message(content=final, view=sign_view)
 
     @app_commands.command(name="intro", description="Introduce yourself to the collective (catizens)")
     async def intro_cmd(self, interaction: discord.Interaction):
@@ -313,10 +322,20 @@ class CommunityCog(commands.Cog, name="Community"):
     @app_commands.command(name="join", description="Sign the constitution and become a citizen")
     async def join(self, interaction: discord.Interaction):
         await interaction.response.defer()
+        await self._perform_sign(interaction)
+
+    async def sign_from_button(self, interaction: discord.Interaction) -> None:
+        """Handler for the persistent 'Sign the constitution' button."""
+        await interaction.response.defer()
+        await self._perform_sign(interaction)
+
+    async def _perform_sign(self, interaction: discord.Interaction) -> None:
         guild_id = str(interaction.guild_id)
         user_id = str(interaction.user.id)
 
         laws = await self.service.list_laws(guild_id)
+        before = await self.service.get_member(guild_id, user_id)
+        already = before.status == CITIZEN
         member = await self.service.sign(guild_id, user_id)
 
         if interaction.guild and isinstance(interaction.user, discord.Member):
@@ -326,6 +345,15 @@ class CommunityCog(commands.Cog, name="Community"):
                     await interaction.user.remove_roles(catizen_role, reason="Signed the constitution")
             except Exception as e:
                 logger.warning("Could not remove Catizen role: %s", e)
+
+        if already:
+            embed = discord.Embed(
+                title="Already a citizen",
+                description="You've already signed the constitution.",
+                color=PINK,
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            return
 
         if member.status == CITIZEN:
             law_lines = (
@@ -337,6 +365,7 @@ class CommunityCog(commands.Cog, name="Community"):
                 title="○ △ □ CONSTITUTION ACCEPTED",
                 description=(
                     f"**{interaction.user.display_name}**, you are now a **citizen**. 🗳️\n\n"
+                    f"You start with **{CITIZEN_STIPEND_SPI} spi** so you can play, not just be fined. "
                     "Voting in `/society` and the `/court` are unlocked. You accept the current constitution:\n"
                     + law_lines
                 ),
@@ -345,11 +374,26 @@ class CommunityCog(commands.Cog, name="Community"):
             embed.set_footer(text="Welcome, comrade. Earn rank via /report.")
         else:
             embed = discord.Embed(
-                title="Already a citizen",
-                description="You've already signed the constitution.",
+                title="Signing failed",
+                description="The collective could not record your signature. Try `/join`.",
                 color=PINK,
             )
         await interaction.followup.send(embed=embed)
+
+        # Citizenship is a public moment - let the hall see it happen.
+        if member.status == CITIZEN and interaction.guild:
+            hall = await self._town_hall_channel(interaction.guild)
+            if hall:
+                try:
+                    await hall.send(embed=discord.Embed(
+                        description=(
+                            f"🗳️ **<@{user_id}> has signed the constitution.** "
+                            "A new citizen of the collective."
+                        ),
+                        color=PINK,
+                    ))
+                except Exception:
+                    pass
 
     @app_commands.command(name="me", description="Your membership status, intro task, and wallet")
     async def me(self, interaction: discord.Interaction):
@@ -377,9 +421,11 @@ class CommunityCog(commands.Cog, name="Community"):
         embed.add_field(name="Membership", value=f"**{status_display}**", inline=True)
         embed.add_field(name="Intro task", value=intro, inline=True)
         embed.add_field(name="Wallet", value=f"`{balance:,} spi`", inline=True)
+        view = None
         if member.status == CATIZEN:
-            embed.set_footer(text="Run /join to sign the constitution and become a citizen.")
-        await interaction.followup.send(embed=embed)
+            embed.set_footer(text="Sign below (or run /join) to become a citizen.")
+            view = SignConstitutionView(self)
+        await interaction.followup.send(embed=embed, view=view)
 
     @citizens.command(name="setup", description="[Admin] Enroll existing members into the community system")
     @app_commands.describe(mode="grandfather = full citizens now; recruit = they must sign + post an intro")

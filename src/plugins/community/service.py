@@ -15,6 +15,7 @@ from src.plugins.community.domain import (
     CASE_OPEN,
     CATIZEN,
     CITIZEN,
+    CITIZEN_STIPEND_SPI,
     COURT_APPEAL_WINDOW_HOURS,
     COURT_FALSE_WITNESS_FINE,
     COURT_QUORUM,
@@ -123,11 +124,22 @@ class CommunityService:
                     await self.bank.ensure_account(guild_id, user_id)
                 except Exception:
                     pass
+            await self._pay_stipend(guild_id, user_id)
             return member
         await self.repo.sign(guild_id, user_id, now)
         member.status = CITIZEN
         member.signed_at = now
+        await self._pay_stipend(guild_id, user_id)
         return member
+
+    async def _pay_stipend(self, guild_id: str, user_id: str) -> None:
+        """A new citizen starts with enough spi to actually play, not just to be fined."""
+        if not self.bank:
+            return
+        try:
+            await self.bank.grant(guild_id, user_id, CITIZEN_STIPEND_SPI, "citizen stipend")
+        except Exception as e:
+            logger.warning("Could not pay citizen stipend to %s: %s", user_id, e)
 
     async def enroll_existing(self, guild_id: str, user_ids, as_citizen: bool) -> int:
         enrolled = 0
