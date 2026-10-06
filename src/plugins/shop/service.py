@@ -103,10 +103,29 @@ class ShopService:
                 except Exception as e:
                     logger.warning("Could not refresh role %s: %s", item.name, e)
             return role
-        return await guild.create_role(
+        role = await guild.create_role(
             name=item.name,
             colour=discord.Colour(item.color),
             hoist=item.hoist,
             mentionable=False,
             reason=f"Shop cosmetic: {item.name}",
         )
+        await self._raise_below_bot(guild, role)
+        return role
+
+    async def _raise_below_bot(self, guild: discord.Guild, role: discord.Role) -> None:
+        """Nudge a new cosmetic above the arena roles, or its colour never shows.
+
+        Discord picks a member's name colour from the highest-positioned role
+        that has one, and create_role() drops new roles at the bottom - below
+        Player and Spectator, which are both coloured. Without this, an arena
+        player pays for a colour and keeps seeing teal.
+        """
+        try:
+            top = guild.me.top_role.position
+            if role.position >= top:
+                return
+            await role.edit(position=top - 1, reason="Cosmetic must outrank arena roles")
+        except Exception as e:
+            # Purely cosmetic: the purchase still stands if the move is refused.
+            logger.warning("Could not raise cosmetic role %s: %s", role.name, e)

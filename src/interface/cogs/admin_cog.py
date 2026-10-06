@@ -135,16 +135,18 @@ class AdminCog(commands.Cog, name="Administration"):
         if hierarchy_warning:
             embed.add_field(name="⚠️ Attention Needed", value=hierarchy_warning, inline=False)
 
-        embed.add_field(
-            name="🔒 Immutable Ledgers",
-            value="• `#tasks`\n• `#deadlines`\n• `#submissions`\n• `#wall-of-shame`",
-            inline=True
-        )
-        embed.add_field(
-            name="🎮 Squid Game Arena",
-            value="• `#game-hub` (Player role only)\n• `#spectators` (Private eliminated deck)",
-            inline=True
-        )
+        # Derived from the plugins themselves so this summary cannot drift as
+        # features are added (it used to hardcode four ledgers and the arena,
+        # and silently omitted #pulse, #tribunal, #new-recruits and #town-hall).
+        groups = []
+        for plugin in self.bot.plugins.values():
+            names = [f"`#{decl.name}`" for decl in plugin.channels]
+            if names:
+                groups.append(f"**{plugin.title or plugin.name}** · " + " ".join(names))
+        if groups:
+            embed.add_field(
+                name="📦 Provisioned by plugin", value="\n".join(groups), inline=False
+            )
         await interaction.followup.send(embed=embed)
 
     @project_group.command(name="status", description="View overall project progress, task health, and milestone countdown")
