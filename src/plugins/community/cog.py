@@ -344,7 +344,7 @@ class CommunityCog(commands.Cog, name="Community"):
             except Exception as e:
                 logger.warning("Could not list unstarted catizens in %s: %s", guild.id, e)
             try:
-                await self._reconcile_citizen_roles(guild)
+                await self.reconcile_citizen_roles(guild)
             except Exception as e:
                 logger.warning("Could not reconcile Citizen roles in %s: %s", guild.id, e)
 
@@ -426,12 +426,15 @@ class CommunityCog(commands.Cog, name="Community"):
         except Exception as e:
             logger.warning("Could not record intro nudge for %s: %s", member.user_id, e)
 
-    async def _reconcile_citizen_roles(self, guild: discord.Guild) -> None:
+    async def reconcile_citizen_roles(self, guild: discord.Guild) -> None:
         """Keep the Citizen role in step with the registry, both directions.
 
         Citizenship lives in the database; the role is only its visible marker.
         They drift when someone leaves and rejoins, or when a role is removed
-        by hand.
+        by hand. Public because /setup calls it too - the Citizen role may have
+        just been created there, and waiting up to six hours for this loop to
+        notice would leave the server looking unreconciled right after an
+        admin explicitly asked for it to be configured.
         """
         citizen_role = self._role(guild, "Citizen")
         if not citizen_role:

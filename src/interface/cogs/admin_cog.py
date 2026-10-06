@@ -126,6 +126,25 @@ class AdminCog(commands.Cog, name="Administration"):
 
         # Provision every plugin's declared channels via the shared ChannelManager
         created_or_found, _ = await self.bot.channel_manager.provision_all(guild, repair=repair)
+
+        # The Citizen role may have just been created above, so sync it against
+        # the registry now rather than leaving it to the community plugin's
+        # six-hourly loop. An admin who ran /setup expects to see it applied.
+        community_cog = self.bot.get_cog("Community")
+        reconcile = getattr(community_cog, "reconcile_citizen_roles", None)
+        if reconcile:
+            try:
+                await reconcile(guild)
+            except Exception as e:
+                logger.warning("Could not reconcile Citizen roles during setup: %s", e)
+        else:
+            # Loud on purpose: a silent no-op here would look exactly like a
+            # successful /setup that simply forgot to hand out the roles.
+            logger.warning(
+                "Skipping Citizen role reconcile: community cog or "
+                "reconcile_citizen_roles not found (cog=%s)", type(community_cog).__name__
+            )
+
         return created_or_found, hierarchy_warning
 
     @commands.Cog.listener()
