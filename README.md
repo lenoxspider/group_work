@@ -1,6 +1,6 @@
 # 🤖 Group Accountability Discord Bot
 
-A clean-architecture Discord bot engineered to eliminate free-riding and miscommunication in student teams through automated task tracking, deadline countdowns, multi-tier T-minus alerts, objective contribution reporting, verified deliverable archiving, a spi economy, and an entry-fee Squid Game arena.
+A clean-architecture Discord bot engineered to eliminate free-riding and miscommunication in student teams through automated task tracking, deadline countdowns, multi-tier T-minus alerts, objective contribution reporting, verified deliverable archiving, a spi economy, an entry-fee Squid Game arena, a citizen constitution with a working tribunal, bot-fired engagement pulses, and a cosmetic spi sink.
 
 ---
 
@@ -11,7 +11,7 @@ This project strictly adheres to Domain-Driven Design (DDD) and Clean Architectu
 - **`src/application/`**: Use cases and orchestration services (`TaskService`, `DeadlineService`, `ActivityService`, `VaultService`) and typed Data Transfer Objects (DTOs).
 - **`src/infrastructure/`**: Asynchronous SQLite repositories (`aiosqlite`), database connection and schema lifecycle, and local file storage vault.
 - **`src/interface/`**: Discord Bot client, presentation formatters (`discord_formatters.py`), and Cogs (`tasks_cog.py`, `deadlines_cog.py`, `reports_cog.py`, `tracker_cog.py`, `admin_cog.py`). Command handlers do exactly three things: parse input → call application service → serialize Discord response.
-- **`src/plugins/`**: Self-contained feature modules (`bank`, `groupwork`, `radio`, `society`, `games`). Each plugin owns its schema, services, and cogs, registers itself into the bot runtime, and wires cross-plugin dependencies (e.g. the games arena escrows spi through the bank).
+- **`src/plugins/`**: Self-contained feature modules (`bank`, `community`, `games`, `groupwork`, `pulse`, `radio`, `shop`, `society`). Each plugin owns its schema, services, and cogs, registers itself into the bot runtime, and wires cross-plugin dependencies (e.g. the games arena escrows spi through the bank, and the shop burns spi through it). Adding a feature means one package plus one entry in `get_plugins()` - `/setup` and `/guide` both pick it up automatically.
 - **`src/config/`**: Strongly typed, validated `Settings` loaded once from environment variables.
 
 ---
@@ -130,6 +130,45 @@ A self-contained arena where the team plays entry-fee elimination games for the 
 - **Economy (zero-inflation escrow)**: entry fees transfer into a `POT` account in the bank (tax-exempt). No minting or burning - the pot is just the sum of entry fees, paid out on conclusion. Last survivor takes all, or the survivors split it evenly. On total extinction the pot carries to the next event.
 - **Red Light Green Light (Round 1)**: a 5-round, timed state machine. Move on green, freeze on red. Move during red light (outside the 0.5s latency grace window) or fail to cross the 100m line before time expires, and you're eliminated with guard voice (`Player zero six seven. Eliminated.`).
 - **Decoupled from accountability**: games never touch your homework. Overdue tasks hit your spi balance and the Wall of Shame, never the arena.
+
+### 9. 🐱 Community, Citizenship & Onboarding
+Members join as **catizens**; signing the constitution makes them **citizens**. Only citizens vote in `/society`, sit on a jury, or spend in `/shop`.
+
+- **`/intro`**: a prompted four-question introduction - pick an option or write your own. Completes Task #1 and pays **+50 spi**. Posted to the private `#new-recruits` and bridged to `#town-hall`.
+- **`/join`**: sign the constitution. Pays a **100 spi** stipend so a new citizen can play rather than only be fined, swaps the `Catizen` role for `Citizen`, and announces the moment to `#town-hall`.
+- **`/me`**: your membership status, intro task, and wallet.
+- **`/citizens setup mode:grandfather`**: enrol existing members as citizens without making them onboard.
+- **Stranded-catizen recovery**: a six-hourly loop DMs anyone who finished their intro but never signed (with a one-click sign button that also works from a DM), and anyone who joined and then went silent. Citizenship is exempt from the Wall of Shame, so this is the only thing that notices.
+- A reconcile pass keeps the `Citizen` role in step with the registry in both directions, so roles cannot drift from the database.
+
+### 10. ⚖️ The Tribunal
+A real court, judged by citizens rather than admins.
+
+- **`/court accuse member:@x law:<LAW-ID> evidence:<text>`** opens a case in `#tribunal`.
+- Citizens judge by reacting ✅ / ❌ on the case card, or with **`/court vote`**. The accuser and the accused are excluded from the jury. Quorum is 3; the vote window is 24h.
+- **`/court defend`** (accused), **`/court evidence`** (accuser), **`/court close`** (magistrate), **`/court appeal`** (one fresh vote, 12h window), **`/court case`**, **`/court docket`**.
+- Conviction burns the law's fine, scaled up for repeat offenders. A convict who cannot pay is shamed instead. False witnesses are fined 25 spi.
+- **`/law list`** reads the constitution; nine founding laws are on the books.
+
+### 11. ⚡ The Pulse
+The bot is the missing player. When the hall goes quiet it fires a short moment on its own initiative, names a winner, and pays them - so the server has a heartbeat without anyone hosting.
+
+- **Trigger**: fires on silence (30 min quiet), never more than once per 2h. Each module declares its own open window.
+- **Modules**, rolled at random:
+  - 👁️ **Odd One Out** - *reaction* mode. One emoji in a 5×5 grid differs; first to click it wins **100 spi**.
+  - 🔐 **Cipher Sprint** - *message* mode. A riddle; the first correct answer typed in chat wins **100 spi**. Answers are normalized and carry aliases, and an expired puzzle reveals its answer.
+  - ⚖️ **Snap Trial** - *vote* mode. The bot charges a random citizen with a made-up crime and the jury has 5 minutes. Guilty pays **50 spi** to the treasury; innocent earns **25 spi**.
+- **`/pulse status`**, **`/pulse fire`** (admin).
+- Adding a module means adding one function to `src/plugins/pulse/modules.py`.
+
+### 12. 🛍️ The Shop (the spi sink)
+The economy's only sink - wealth finally has somewhere to go.
+
+- **`/shop view`**, **`/shop buy item:<id>`**, **`/shop inventory`**.
+- Eight cosmetics at 300-2,500 spi: the three marks ○ △ □, name colours, and hoisted titles.
+- **Purchases burn spi into the bank's SINK**, so it leaves circulation permanently rather than moving to the treasury.
+- Roles are created on demand and ordered priciest-highest, so the most expensive cosmetic a member owns wins their name colour. That needs headroom below the bot's top role; `/setup` warns when the guild has not left enough.
+- Delivery is deliver-then-charge: the role is granted first and rolled back if the burn fails, so spi is never taken without delivery. Gated behind citizenship.
 
 ---
 

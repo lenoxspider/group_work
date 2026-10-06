@@ -23,6 +23,7 @@ from src.plugins.community.domain import (
     Case,
     Member,
     SIGN_NUDGE_COOLDOWN_HOURS,
+    INTRO_NUDGE_AFTER_DAYS,
     utcnow,
 )
 from src.plugins.community.repository import SQLiteCommunityRepository
@@ -82,6 +83,13 @@ class CommunityService:
 
     async def mark_sign_nudged(self, guild_id: str, user_id: str) -> None:
         await self.repo.set_sign_nudge(guild_id, user_id, utcnow())
+
+    async def list_unstarted_catizens(self, guild_id: str) -> list[Member]:
+        """Catizens who joined days ago and never started their introduction."""
+        now = datetime.now(timezone.utc)
+        joined_before = (now - timedelta(days=INTRO_NUDGE_AFTER_DAYS)).isoformat(timespec="seconds")
+        nudge_before = (now - timedelta(hours=SIGN_NUDGE_COOLDOWN_HOURS)).isoformat(timespec="seconds")
+        return await self.repo.list_unstarted_catizens(guild_id, joined_before, nudge_before)
 
     async def on_join(self, guild_id: str, user_id: str) -> Optional[Member]:
         existing = await self.repo.get_member(guild_id, user_id)

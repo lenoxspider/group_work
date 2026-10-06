@@ -110,22 +110,46 @@ class ShopService:
             mentionable=False,
             reason=f"Shop cosmetic: {item.name}",
         )
-        await self._raise_below_bot(guild, role)
+        await self._order_cosmetics(guild)
         return role
 
-    async def _raise_below_bot(self, guild: discord.Guild, role: discord.Role) -> None:
-        """Nudge a new cosmetic above the arena roles, or its colour never shows.
+    async def _order_cosmetics(self, guild: discord.Guild) -> None:
+        """Order the cosmetic roles that exist, priciest highest.
 
-        Discord picks a member's name colour from the highest-positioned role
-        that has one, and create_role() drops new roles at the bottom - below
-        Player and Spectator, which are both coloured. Without this, an arena
-        player pays for a colour and keeps seeing teal.
+        Two things have to be true for a purchase to be visible. A cosmetic must
+        outrank the coloured arena roles (Discord takes a member's name colour
+        from their highest coloured role, and create_role drops new roles at the
+        bottom, under Player), and when someone owns several cosmetics the most
+        expensive one should win.
+
+        A bot can only place roles below its own top role, so if the guild has
+        not left enough headroom we order what fits and say so in the log.
         """
-        try:
-            top = guild.me.top_role.position
-            if role.position >= top:
-                return
-            await role.edit(position=top - 1, reason="Cosmetic must outrank arena roles")
-        except Exception as e:
-            # Purely cosmetic: the purchase still stands if the move is refused.
-            logger.warning("Could not raise cosmetic role %s: %s", role.name, e)
+        by_name = {item.name: item for item in CATALOGUE}
+        present = [r for r in guild.roles if r.name in by_name]
+        if not present:
+            return
+        present.sort(key=lambda r: by_name[r.name].price, reverse=True)
+
+        top = guild.me.top_role.position
+        slots = max(top - 1, 0)  # usable positions are 1..top-1
+        if len(present) > slots:
+            logger.warning(
+                "Guild %s: %s role slot(s) below the bot's top role but %s cosmetics. "
+                "Drag the bot's role higher in Server Settings > Roles so colours "
+                "resolve by price instead of colliding.",
+                guild.id, slots, len(present),
+            )
+
+        for index, role in enumerate(present):
+            target = top - 1 - index
+            if target < 1:
+                break  # out of usable slots; the rest stay where Discord put them
+            if role.position == target:
+                continue
+            try:
+                await role.edit(position=target, reason="Shop cosmetics ordered by price")
+            except Exception as e:
+                # Purely cosmetic: the purchase stands even if the move is refused.
+                logger.warning("Could not order cosmetic role %s: %s", role.name, e)
+                break

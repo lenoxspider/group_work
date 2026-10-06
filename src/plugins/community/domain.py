@@ -22,6 +22,7 @@ COURT_FALSE_WITNESS_FINE = 25
 # Onboarding
 CITIZEN_STIPEND_SPI = 100      # paid once on signing, so a new citizen can actually play
 SIGN_NUDGE_COOLDOWN_HOURS = 24  # never DM the same stranded catizen more often
+INTRO_NUDGE_AFTER_DAYS = 2      # chase a catizen who never even started the intro
 
 
 def utcnow() -> str:

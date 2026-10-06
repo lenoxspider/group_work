@@ -82,6 +82,28 @@ class SQLiteCommunityRepository:
             await db.execute(query, (ts, guild_id, user_id))
             await db.commit()
 
+    async def list_unstarted_catizens(
+        self, guild_id: str, joined_before: str, nudge_before: str
+    ) -> List[Member]:
+        """Catizens who joined a while ago and never even started their intro.
+
+        The intro task is exempt from the Wall of Shame, so without this nobody
+        ever notices a member who joins and then does nothing at all.
+        """
+        query = """
+            SELECT guild_id, user_id, status, intro_task_id, intro_done, joined_at, signed_at
+            FROM member_registry
+            WHERE guild_id = ? AND status = ? AND intro_done = 0 AND signed_at IS NULL
+              AND joined_at < ?
+              AND (sign_nudge_at IS NULL OR sign_nudge_at < ?)
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                query, (guild_id, CATIZEN, joined_before, nudge_before)
+            ) as cur:
+                rows = await cur.fetchall()
+                return [self._row_to_member(r) for r in rows]
+
     async def sign(self, guild_id: str, user_id: str, signed_at: str) -> None:
         query = "UPDATE member_registry SET status = ?, signed_at = ? WHERE guild_id = ? AND user_id = ?"
         async with aiosqlite.connect(self.db_path) as db:

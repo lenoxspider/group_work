@@ -86,12 +86,43 @@ class AdminCog(commands.Cog, name="Administration"):
                 except Exception as e:
                     logger.warning("Could not auto-create Catizen role in guild %s: %s", guild.id, e)
 
+            if not discord.utils.get(guild.roles, name="Citizen"):
+                try:
+                    await guild.create_role(
+                        name="Citizen",
+                        # Deliberately colourless: a colour here would outrank and
+                        # hide the shop cosmetics people paid for. Hoisted instead,
+                        # so citizens read as their own group in the member list.
+                        color=discord.Color.default(),
+                        hoist=True,
+                        mentionable=False,
+                        reason="Signed the constitution (full citizen)"
+                    )
+                except Exception as e:
+                    logger.warning("Could not auto-create Citizen role in guild %s: %s", guild.id, e)
+
         # Hierarchy check
         if player_role and guild.me.top_role.position <= player_role.position:
             hierarchy_warning = (
                 f"⚠️ **Role Hierarchy Warning**: Bot's top role (`{guild.me.top_role.name}`) is below "
                 f"or equal to the `Player` role! Please drag the bot's role higher in Server Settings → Roles."
             )
+
+        # Headroom check: the bot can only place roles below its own top role.
+        shop = self.bot.plugins.get("shop")
+        if shop:
+            catalogue_size = len(shop.service.catalogue())
+            slots = max(guild.me.top_role.position - 1, 0)
+            if slots < catalogue_size:
+                headroom = (
+                    f"⚠️ **Cosmetic Headroom**: only **{slots}** role slot(s) sit below "
+                    f"`{guild.me.top_role.name}`, but the shop has **{catalogue_size}** cosmetics. "
+                    "Drag the bot's role to the top in Server Settings → Roles, otherwise purchased "
+                    "colours collide and the most expensive one may not be the one that shows."
+                )
+                hierarchy_warning = (
+                    f"{hierarchy_warning}\n\n{headroom}" if hierarchy_warning else headroom
+                )
 
         # Provision every plugin's declared channels via the shared ChannelManager
         created_or_found, _ = await self.bot.channel_manager.provision_all(guild, repair=repair)

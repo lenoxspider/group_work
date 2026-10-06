@@ -1,6 +1,7 @@
 """Community Cog - onboarding, the constitution, and the tribunal."""
 
 import logging
+from datetime import datetime, timezone
 from typing import Literal, Optional
 
 import discord
@@ -323,19 +324,29 @@ class CommunityCog(commands.Cog, name="Community"):
 
     @tasks.loop(hours=6)
     async def nudge_loop(self):
-        """DM anyone who finished their introduction but never signed.
+        """Chase stranded catizens and keep membership roles honest.
 
-        The sign prompt used to live only on an old #new-recruits message, so
-        members who did the work stayed catizens forever without seeing it.
+        Two failure modes: members who did the introduction but never signed
+        (the prompt used to live only on an old #new-recruits message), and
+        members who joined and then did nothing at all - which nothing else
+        notices, because the intro task is exempt from the Wall of Shame.
         """
         for guild in self.bot.guilds:
+            gid = str(guild.id)
             try:
-                pending = await self.service.list_pending_signers(str(guild.id))
+                for member in await self.service.list_pending_signers(gid):
+                    await self._dm_sign_nudge(guild, member)
             except Exception as e:
                 logger.warning("Could not list pending signers in %s: %s", guild.id, e)
-                continue
-            for member in pending:
-                await self._dm_sign_nudge(guild, member)
+            try:
+                for member in await self.service.list_unstarted_catizens(gid):
+                    await self._dm_intro_nudge(guild, member)
+            except Exception as e:
+                logger.warning("Could not list unstarted catizens in %s: %s", guild.id, e)
+            try:
+                await self._reconcile_citizen_roles(guild)
+            except Exception as e:
+                logger.warning("Could not reconcile Citizen roles in %s: %s", guild.id, e)
 
     @nudge_loop.before_loop
     async def before_nudge_loop(self):
@@ -371,6 +382,75 @@ class CommunityCog(commands.Cog, name="Community"):
         except Exception as e:
             logger.warning("Could not record sign nudge for %s: %s", member.user_id, e)
 
+    async def _dm_intro_nudge(self, guild: discord.Guild, member) -> None:
+        """Chase a catizen who never started the introduction.
+
+        Text only on purpose: /intro needs a guild interaction, so a button in
+        a DM would dead-end. This points them back at the server instead.
+        """
+        try:
+            user = self.bot.get_user(int(member.user_id))
+            if not user:
+                user = await self.bot.fetch_user(int(member.user_id))
+        except Exception:
+            return
+
+        since = ""
+        try:
+            joined = datetime.fromisoformat(member.joined_at)
+            if joined.tzinfo is None:
+                joined = joined.replace(tzinfo=timezone.utc)
+            since = f" {max((datetime.now(timezone.utc) - joined).days, 1)} days ago"
+        except Exception:
+            pass
+
+        embed = discord.Embed(
+            title="○ △ □ YOU ARE STILL A CATIZEN",
+            description=(
+                f"You joined **{guild.name}**{since} and have not introduced yourself.\n\n"
+                "Until you do, you cannot vote, sit on a jury, or spend spi. It takes two "
+                "minutes: open `#new-recruits` and run `/intro`.\n\n"
+                f"Task #1 pays **50 spi**, and signing the constitution afterwards pays "
+                f"**{CITIZEN_STIPEND_SPI} spi** more."
+            ),
+            color=PINK,
+        )
+        try:
+            await user.send(embed=embed)
+        except Exception as e:
+            logger.info("Intro nudge DM refused for %s: %s", member.user_id, e)
+            return
+        try:
+            await self.service.mark_sign_nudged(str(guild.id), member.user_id)
+            logger.info("Sent intro nudge DM to %s", member.user_id)
+        except Exception as e:
+            logger.warning("Could not record intro nudge for %s: %s", member.user_id, e)
+
+    async def _reconcile_citizen_roles(self, guild: discord.Guild) -> None:
+        """Keep the Citizen role in step with the registry, both directions.
+
+        Citizenship lives in the database; the role is only its visible marker.
+        They drift when someone leaves and rejoins, or when a role is removed
+        by hand.
+        """
+        citizen_role = self._role(guild, "Citizen")
+        if not citizen_role:
+            return
+        citizens = {str(uid) for uid in await self.service.list_citizens(str(guild.id))}
+        for m in guild.members:
+            if m.bot:
+                continue
+            should_have = str(m.id) in citizens
+            if should_have == (citizen_role in m.roles):
+                continue
+            try:
+                if should_have:
+                    await m.add_roles(citizen_role, reason="Citizen per the registry")
+                else:
+                    await m.remove_roles(citizen_role, reason="Not a citizen per the registry")
+            except Exception as e:
+                logger.warning("Could not reconcile Citizen role for %s: %s", m.id, e)
+
     # --- Membership commands ---
 
     @app_commands.command(name="join", description="Sign the constitution and become a citizen")
@@ -403,12 +483,16 @@ class CommunityCog(commands.Cog, name="Community"):
 
         if guild:
             try:
-                catizen_role = self._role(guild, "Catizen")
                 gm = guild.get_member(int(user_id))
-                if catizen_role and gm and catizen_role in gm.roles:
-                    await gm.remove_roles(catizen_role, reason="Signed the constitution")
+                if gm:
+                    catizen_role = self._role(guild, "Catizen")
+                    if catizen_role and catizen_role in gm.roles:
+                        await gm.remove_roles(catizen_role, reason="Signed the constitution")
+                    citizen_role = self._role(guild, "Citizen")
+                    if citizen_role and citizen_role not in gm.roles:
+                        await gm.add_roles(citizen_role, reason="Signed the constitution")
             except Exception as e:
-                logger.warning("Could not remove Catizen role: %s", e)
+                logger.warning("Could not update membership roles: %s", e)
 
         if already:
             embed = discord.Embed(
