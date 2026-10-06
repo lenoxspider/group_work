@@ -18,6 +18,7 @@ def get_plugins(bot) -> list[Plugin]:
     from src.plugins.groupwork.plugin import GroupworkPlugin
     from src.plugins.pulse.plugin import PulsePlugin
     from src.plugins.radio.plugin import RadioPlugin
+    from src.plugins.shop.plugin import ShopPlugin
     from src.plugins.society.plugin import SocietyPlugin
 
     return [
@@ -27,5 +28,6 @@ def get_plugins(bot) -> list[Plugin]:
         GamesPlugin(bot),
         PulsePlugin(bot),
         RadioPlugin(bot),
+        ShopPlugin(bot),
         SocietyPlugin(bot),
     ]

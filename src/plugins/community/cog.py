@@ -78,12 +78,14 @@ class CommunityCog(commands.Cog, name="Community"):
         self.channel_router = channel_router
         self._intro = {}
         self.court_loop.start()
+        self.nudge_loop.start()
 
     citizens = app_commands.Group(name="citizens", description="Membership administration")
     court = app_commands.Group(name="court", description="The tribunal - citizens judge the law")
 
     def cog_unload(self):
         self.court_loop.cancel()
+        self.nudge_loop.cancel()
 
     async def cog_load(self):
         self.bot.add_view(StartIntroView(self))
@@ -317,6 +319,58 @@ class CommunityCog(commands.Cog, name="Community"):
     async def before_court_loop(self):
         await self.bot.wait_until_ready()
 
+    # --- Stranded catizens: did the work, never signed ---
+
+    @tasks.loop(hours=6)
+    async def nudge_loop(self):
+        """DM anyone who finished their introduction but never signed.
+
+        The sign prompt used to live only on an old #new-recruits message, so
+        members who did the work stayed catizens forever without seeing it.
+        """
+        for guild in self.bot.guilds:
+            try:
+                pending = await self.service.list_pending_signers(str(guild.id))
+            except Exception as e:
+                logger.warning("Could not list pending signers in %s: %s", guild.id, e)
+                continue
+            for member in pending:
+                await self._dm_sign_nudge(guild, member)
+
+    @nudge_loop.before_loop
+    async def before_nudge_loop(self):
+        await self.bot.wait_until_ready()
+
+    async def _dm_sign_nudge(self, guild: discord.Guild, member) -> None:
+        try:
+            user = self.bot.get_user(int(member.user_id))
+            if not user:
+                user = await self.bot.fetch_user(int(member.user_id))
+        except Exception:
+            return
+        embed = discord.Embed(
+            title="○ △ □ ONE STEP LEFT",
+            description=(
+                f"You introduced yourself to **{guild.name}** and cleared Task #1 - but you never "
+                "signed the constitution, so you are still a **catizen**.\n\n"
+                "Citizens vote in `/society`, sit on juries in `/court`, and can spend spi in "
+                f"`/shop`. Signing pays **{CITIZEN_STIPEND_SPI} spi** on the spot.\n\n"
+                "One click below and it is done."
+            ),
+            color=PINK,
+        )
+        try:
+            await user.send(embed=embed, view=SignConstitutionView(self))
+        except Exception as e:
+            # DMs closed - leave them unmarked so we retry on a later pass.
+            logger.info("Sign nudge DM refused for %s: %s", member.user_id, e)
+            return
+        try:
+            await self.service.mark_sign_nudged(str(guild.id), member.user_id)
+            logger.info("Sent sign nudge DM to %s", member.user_id)
+        except Exception as e:
+            logger.warning("Could not record sign nudge for %s: %s", member.user_id, e)
+
     # --- Membership commands ---
 
     @app_commands.command(name="join", description="Sign the constitution and become a citizen")
@@ -330,19 +384,29 @@ class CommunityCog(commands.Cog, name="Community"):
         await self._perform_sign(interaction)
 
     async def _perform_sign(self, interaction: discord.Interaction) -> None:
-        guild_id = str(interaction.guild_id)
+        # Signing can also happen from a DM nudge, where guild_id is absent.
+        guild_id = self._resolve_guild_id(interaction)
+        if not guild_id:
+            await interaction.followup.send(
+                "I could not work out which server to sign you into. Run `/join` there instead.",
+                ephemeral=True,
+            )
+            return
         user_id = str(interaction.user.id)
+        guild = self.bot.get_guild(int(guild_id))
+        name = getattr(interaction.user, "display_name", None) or interaction.user.name
 
         laws = await self.service.list_laws(guild_id)
         before = await self.service.get_member(guild_id, user_id)
         already = before.status == CITIZEN
         member = await self.service.sign(guild_id, user_id)
 
-        if interaction.guild and isinstance(interaction.user, discord.Member):
+        if guild:
             try:
-                catizen_role = self._role(interaction.guild, "Catizen")
-                if catizen_role and catizen_role in interaction.user.roles:
-                    await interaction.user.remove_roles(catizen_role, reason="Signed the constitution")
+                catizen_role = self._role(guild, "Catizen")
+                gm = guild.get_member(int(user_id))
+                if catizen_role and gm and catizen_role in gm.roles:
+                    await gm.remove_roles(catizen_role, reason="Signed the constitution")
             except Exception as e:
                 logger.warning("Could not remove Catizen role: %s", e)
 
@@ -364,7 +428,7 @@ class CommunityCog(commands.Cog, name="Community"):
             embed = discord.Embed(
                 title="○ △ □ CONSTITUTION ACCEPTED",
                 description=(
-                    f"**{interaction.user.display_name}**, you are now a **citizen**. 🗳️\n\n"
+                    f"**{name}**, you are now a **citizen**. 🗳️\n\n"
                     f"You start with **{CITIZEN_STIPEND_SPI} spi** so you can play, not just be fined. "
                     "Voting in `/society` and the `/court` are unlocked. You accept the current constitution:\n"
                     + law_lines
@@ -381,8 +445,8 @@ class CommunityCog(commands.Cog, name="Community"):
         await interaction.followup.send(embed=embed)
 
         # Citizenship is a public moment - let the hall see it happen.
-        if member.status == CITIZEN and interaction.guild:
-            hall = await self._town_hall_channel(interaction.guild)
+        if member.status == CITIZEN and guild:
+            hall = await self._town_hall_channel(guild)
             if hall:
                 try:
                     await hall.send(embed=discord.Embed(
@@ -394,6 +458,17 @@ class CommunityCog(commands.Cog, name="Community"):
                     ))
                 except Exception:
                     pass
+
+    def _resolve_guild_id(self, interaction: discord.Interaction) -> Optional[str]:
+        """Guild id for an interaction, falling back for DM-originated buttons."""
+        if interaction.guild_id:
+            return str(interaction.guild_id)
+        configured = getattr(self.bot.settings, "guild_id", None)
+        if configured:
+            return str(configured)
+        if self.bot.guilds:
+            return str(self.bot.guilds[0].id)
+        return None
 
     @app_commands.command(name="me", description="Your membership status, intro task, and wallet")
     async def me(self, interaction: discord.Interaction):

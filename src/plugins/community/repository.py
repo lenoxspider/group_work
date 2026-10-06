@@ -59,6 +59,29 @@ class SQLiteCommunityRepository:
                 rows = await cur.fetchall()
                 return [r[0] for r in rows]
 
+    async def list_pending_signers(self, guild_id: str, nudge_before: str) -> List[Member]:
+        """Catizens who did the work (intro complete) but never signed.
+
+        `nudge_before` is an ISO cutoff: only rows never nudged, or nudged
+        before that moment, come back.
+        """
+        query = """
+            SELECT guild_id, user_id, status, intro_task_id, intro_done, joined_at, signed_at
+            FROM member_registry
+            WHERE guild_id = ? AND status = ? AND intro_done = 1 AND signed_at IS NULL
+              AND (sign_nudge_at IS NULL OR sign_nudge_at < ?)
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(query, (guild_id, CATIZEN, nudge_before)) as cur:
+                rows = await cur.fetchall()
+                return [self._row_to_member(r) for r in rows]
+
+    async def set_sign_nudge(self, guild_id: str, user_id: str, ts: str) -> None:
+        query = "UPDATE member_registry SET sign_nudge_at = ? WHERE guild_id = ? AND user_id = ?"
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(query, (ts, guild_id, user_id))
+            await db.commit()
+
     async def sign(self, guild_id: str, user_id: str, signed_at: str) -> None:
         query = "UPDATE member_registry SET status = ?, signed_at = ? WHERE guild_id = ? AND user_id = ?"
         async with aiosqlite.connect(self.db_path) as db:

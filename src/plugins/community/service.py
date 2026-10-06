@@ -22,6 +22,7 @@ from src.plugins.community.domain import (
     COURT_VOTE_WINDOW_HOURS,
     Case,
     Member,
+    SIGN_NUDGE_COOLDOWN_HOURS,
     utcnow,
 )
 from src.plugins.community.repository import SQLiteCommunityRepository
@@ -71,6 +72,16 @@ class CommunityService:
 
     async def list_citizens(self, guild_id: str) -> list[str]:
         return await self.repo.list_citizens(guild_id)
+
+    async def list_pending_signers(self, guild_id: str) -> list[Member]:
+        """Catizens who finished their intro but never signed, and are due a nudge."""
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=SIGN_NUDGE_COOLDOWN_HOURS)
+        ).isoformat()
+        return await self.repo.list_pending_signers(guild_id, cutoff)
+
+    async def mark_sign_nudged(self, guild_id: str, user_id: str) -> None:
+        await self.repo.set_sign_nudge(guild_id, user_id, utcnow())
 
     async def on_join(self, guild_id: str, user_id: str) -> Optional[Member]:
         existing = await self.repo.get_member(guild_id, user_id)

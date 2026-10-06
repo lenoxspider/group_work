@@ -4,7 +4,7 @@ from src.interface.channel_manager import ChannelDecl
 from src.plugins.base import Plugin
 from src.plugins.community.cog import CommunityCog
 from src.plugins.community.repository import SQLiteCommunityRepository
-from src.plugins.community.schema import COMMUNITY_SCHEMA
+from src.plugins.community.schema import COMMUNITY_MIGRATIONS, COMMUNITY_SCHEMA
 from src.plugins.community.service import CommunityService
 
 
@@ -21,7 +21,7 @@ class CommunityPlugin(Plugin):
         ("/citizens setup · announce", "[Admin] Enroll existing members, post the founding proclamation"),
     ]
     schema = COMMUNITY_SCHEMA
-    migrations = []
+    migrations = COMMUNITY_MIGRATIONS
 
     def __init__(self, bot):
         self.bot = bot
