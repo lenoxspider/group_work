@@ -36,14 +36,17 @@ fi
 DISCORD_BOT_TOKEN="${1:-${DISCORD_BOT_TOKEN:-}}"
 GUILD_ID="${2:-${GUILD_ID:-}}"
 
-if [[ -z "$DISCORD_BOT_TOKEN" ]]; then
+# An existing .env carries settings this script does not know about
+# (YTDLP_COOKIES, YTDLP_POT_SERVER_HOME, TTS_ENABLED=true), so only prompt for
+# credentials when there is nothing to reuse.
+if [[ -z "$DISCORD_BOT_TOKEN" && ! -f "$INSTALL_DIR/.env" ]]; then
   read -rp "Discord bot token: " DISCORD_BOT_TOKEN
 fi
-if [[ -z "$GUILD_ID" ]]; then
+if [[ -z "$GUILD_ID" && ! -f "$INSTALL_DIR/.env" ]]; then
   read -rp "Guild ID (server id, optional): " GUILD_ID
 fi
-if [[ -z "$DISCORD_BOT_TOKEN" ]]; then
-  err "DISCORD_BOT_TOKEN is required."
+if [[ -z "$DISCORD_BOT_TOKEN" && ! -f "$INSTALL_DIR/.env" ]]; then
+  err "DISCORD_BOT_TOKEN is required (no existing .env to reuse)."
 fi
 
 # --- 1. System dependencies ------------------------------------------------
@@ -88,8 +91,15 @@ fi
 "$INSTALL_DIR/.venv/bin/python" -m pip install -r "$INSTALL_DIR/requirements.txt"
 
 # --- 5. .env configuration -------------------------------------------------
-log "Writing .env..."
-cat > "$INSTALL_DIR/.env" <<EOF
+# Never overwrite an existing .env. Re-running this script used to rewrite it
+# from the template below, silently dropping the yt-dlp cookie/PO-token paths
+# and resetting TTS_ENABLED to false on a live install.
+if [[ -f "$INSTALL_DIR/.env" ]]; then
+  log ".env already exists — leaving it untouched."
+  log "    Edit $INSTALL_DIR/.env by hand; this script will not change it."
+else
+  log "Writing .env..."
+  cat > "$INSTALL_DIR/.env" <<EOF
 DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
 GUILD_ID=${GUILD_ID}
 
@@ -108,7 +118,8 @@ TTS_BINARY=espeak-ng
 TTS_VOICE_DEFAULT=en-us
 TTS_DELIVERY=attachment
 EOF
-chmod 600 "$INSTALL_DIR/.env"
+  chmod 600 "$INSTALL_DIR/.env"
+fi
 
 # --- 6. Ownership ----------------------------------------------------------
 log "Fixing ownership..."
@@ -142,11 +153,59 @@ systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME"
 
-# --- 8. Done ---------------------------------------------------------------
+# --- 8. Nightly database backup --------------------------------------------
+# The database is the only irreplaceable state in this system: laws, balances,
+# the member registry and the transaction history all live in it and none of it
+# is in git.
+log "Installing database backup timer..."
+BACKUP_DIR="/var/backups/groupwork"
+install -d -o "$RUN_USER" -g "$RUN_USER" -m 750 "$BACKUP_DIR"
+
+cat > "/etc/systemd/system/${SERVICE_NAME}-backup.service" <<EOF
+[Unit]
+Description=Group Accountability Bot database backup
+
+[Service]
+Type=oneshot
+User=${RUN_USER}
+Group=${RUN_USER}
+Environment=GROUPWORK_DB=${INSTALL_DIR}/bot_database.sqlite
+Environment=GROUPWORK_BACKUP_DIR=${BACKUP_DIR}
+Environment=GROUPWORK_BACKUP_KEEP=14
+ExecStart=${INSTALL_DIR}/.venv/bin/python ${INSTALL_DIR}/scripts/backup_database.py
+EOF
+
+cat > "/etc/systemd/system/${SERVICE_NAME}-backup.timer" <<EOF
+[Unit]
+Description=Nightly Group Accountability Bot database backup
+
+[Timer]
+OnCalendar=*-*-* 04:17:00
+Persistent=true
+RandomizedDelaySec=900
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now "${SERVICE_NAME}-backup.timer"
+
+# Prove it works now rather than discovering a broken backup during a restore.
+log "Running a first backup..."
+if systemctl start "${SERVICE_NAME}-backup.service"; then
+  journalctl -u "${SERVICE_NAME}-backup.service" -n 3 --no-pager -o cat | sed 's/^/    /'
+else
+  err "First backup failed - check: journalctl -u ${SERVICE_NAME}-backup.service"
+fi
+
+# --- 9. Done ---------------------------------------------------------------
 log "Setup complete. Bot service: $SERVICE_NAME"
 echo "  status:   systemctl status $SERVICE_NAME"
 echo "  logs:     journalctl -u $SERVICE_NAME -f"
 echo "  restart:  systemctl restart $SERVICE_NAME"
 echo "  stop:     systemctl stop $SERVICE_NAME"
+echo "  backups:  systemctl list-timers $SERVICE_NAME-backup.timer"
+echo "            ls -la $BACKUP_DIR"
 echo
 echo "Give it a few seconds, then check the logs to confirm it connected."
