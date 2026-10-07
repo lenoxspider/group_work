@@ -6,6 +6,8 @@ What it does:
 """
 
 from datetime import datetime, timezone, timedelta
+from typing import Optional
+
 from src.domain.entities.task import Task
 from src.domain.entities.deadline import Deadline
 from src.domain.entities.member_activity import MemberActivity
