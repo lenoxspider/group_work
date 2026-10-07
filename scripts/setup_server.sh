@@ -62,6 +62,28 @@ else
   err "Unsupported package manager. This script targets Debian/Ubuntu."
 fi
 
+# --- 1b. Swap ---------------------------------------------------------------
+# Small VPS images ship with no swap at all. A 1 GB box running this bot
+# alongside anything else will eventually OOM-kill it, because yt-dlp, ffmpeg
+# and espeak-ng all spike well above their idle footprint.
+log "Ensuring swap exists..."
+if ! swapon --show=NAME --noheadings 2>/dev/null | grep -q .; then
+  SWAP_FILE="/swapfile"
+  SWAP_SIZE_MB="${SWAP_SIZE_MB:-2048}"
+  # dd rather than fallocate: a fallocated file can have holes swapon rejects.
+  dd if=/dev/zero of="$SWAP_FILE" bs=1M count="$SWAP_SIZE_MB" status=none
+  chmod 600 "$SWAP_FILE"
+  mkswap "$SWAP_FILE" >/dev/null
+  swapon "$SWAP_FILE"
+  grep -q "^$SWAP_FILE" /etc/fstab || echo "$SWAP_FILE none swap sw 0 0" >> /etc/fstab
+  # Prefer RAM; only touch swap under real pressure.
+  echo 'vm.swappiness=10' > /etc/sysctl.d/99-swappiness.conf
+  sysctl -q -p /etc/sysctl.d/99-swappiness.conf
+  log "  created ${SWAP_SIZE_MB}MB swap at $SWAP_FILE"
+else
+  log "  swap already present — leaving it alone"
+fi
+
 # --- 2. Dedicated service user --------------------------------------------
 log "Ensuring service user '$RUN_USER'..."
 if ! id "$RUN_USER" >/dev/null 2>&1; then
