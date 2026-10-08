@@ -2,7 +2,7 @@
 
 from typing import List, Optional
 
-import aiosqlite
+from src.infrastructure.database.sqlite import connect
 
 from src.plugins.community.domain import (
     CASE_CONVICTED,
@@ -32,7 +32,7 @@ class SQLiteCommunityRepository:
                 guild_id, user_id, status, intro_task_id, intro_done, joined_at, signed_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(
                 query,
                 (
@@ -47,14 +47,14 @@ class SQLiteCommunityRepository:
             SELECT guild_id, user_id, status, intro_task_id, intro_done, joined_at, signed_at
             FROM member_registry WHERE guild_id = ? AND user_id = ?
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (guild_id, user_id)) as cur:
                 row = await cur.fetchone()
                 return self._row_to_member(row) if row else None
 
     async def list_citizens(self, guild_id: str) -> List[str]:
         query = "SELECT user_id FROM member_registry WHERE guild_id = ? AND status = ?"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (guild_id, CITIZEN)) as cur:
                 rows = await cur.fetchall()
                 return [r[0] for r in rows]
@@ -71,14 +71,14 @@ class SQLiteCommunityRepository:
             WHERE guild_id = ? AND status = ? AND intro_done = 1 AND signed_at IS NULL
               AND (sign_nudge_at IS NULL OR sign_nudge_at < ?)
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (guild_id, CATIZEN, nudge_before)) as cur:
                 rows = await cur.fetchall()
                 return [self._row_to_member(r) for r in rows]
 
     async def set_sign_nudge(self, guild_id: str, user_id: str, ts: str) -> None:
         query = "UPDATE member_registry SET sign_nudge_at = ? WHERE guild_id = ? AND user_id = ?"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(query, (ts, guild_id, user_id))
             await db.commit()
 
@@ -97,7 +97,7 @@ class SQLiteCommunityRepository:
               AND joined_at < ?
               AND (sign_nudge_at IS NULL OR sign_nudge_at < ?)
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(
                 query, (guild_id, CATIZEN, joined_before, nudge_before)
             ) as cur:
@@ -106,19 +106,19 @@ class SQLiteCommunityRepository:
 
     async def sign(self, guild_id: str, user_id: str, signed_at: str) -> None:
         query = "UPDATE member_registry SET status = ?, signed_at = ? WHERE guild_id = ? AND user_id = ?"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(query, (CITIZEN, signed_at, guild_id, user_id))
             await db.commit()
 
     async def set_intro_task(self, guild_id: str, user_id: str, task_id: str) -> None:
         query = "UPDATE member_registry SET intro_task_id = ? WHERE guild_id = ? AND user_id = ?"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(query, (task_id, guild_id, user_id))
             await db.commit()
 
     async def mark_intro_done(self, guild_id: str, user_id: str) -> None:
         query = "UPDATE member_registry SET intro_done = 1 WHERE guild_id = ? AND user_id = ?"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(query, (guild_id, user_id))
             await db.commit()
 
@@ -149,7 +149,7 @@ class SQLiteCommunityRepository:
                 opened_at = excluded.opened_at,
                 resolved_at = excluded.resolved_at
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(
                 query,
                 (
@@ -163,21 +163,21 @@ class SQLiteCommunityRepository:
 
     async def get_case(self, case_id: str) -> Optional[Case]:
         query = f"SELECT {_CASE_COLS} FROM court_cases WHERE case_id = ?"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (case_id,)) as cur:
                 row = await cur.fetchone()
                 return self._row_to_case(row) if row else None
 
     async def get_case_by_message(self, message_id: str) -> Optional[Case]:
         query = f"SELECT {_CASE_COLS} FROM court_cases WHERE message_id = ?"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (message_id,)) as cur:
                 row = await cur.fetchone()
                 return self._row_to_case(row) if row else None
 
     async def list_open_cases(self, guild_id: str) -> List[Case]:
         query = f"SELECT {_CASE_COLS} FROM court_cases WHERE guild_id = ? AND status = ?"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (guild_id, CASE_OPEN)) as cur:
                 rows = await cur.fetchall()
                 return [self._row_to_case(r) for r in rows]
@@ -187,14 +187,14 @@ class SQLiteCommunityRepository:
             f"SELECT {_CASE_COLS} FROM court_cases "
             "WHERE guild_id = ? AND status = ? AND round = 1 AND sentenced = 0"
         )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (guild_id, CASE_CONVICTED)) as cur:
                 rows = await cur.fetchall()
                 return [self._row_to_case(r) for r in rows]
 
     async def has_open_case_for(self, guild_id: str, accused_id: str) -> bool:
         query = "SELECT 1 FROM court_cases WHERE guild_id = ? AND accused_id = ? AND status = ? LIMIT 1"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (guild_id, accused_id, CASE_OPEN)) as cur:
                 return await cur.fetchone() is not None
 
@@ -203,7 +203,7 @@ class SQLiteCommunityRepository:
             "SELECT COUNT(*) FROM court_cases WHERE guild_id = ? AND accused_id = ? "
             "AND law_id = ? AND status = ? AND sentenced = 1 AND case_id != ?"
         )
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (guild_id, accused_id, law_id, CASE_CONVICTED, exclude_case_id)) as cur:
                 row = await cur.fetchone()
                 return row[0] if row else 0

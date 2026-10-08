@@ -12,6 +12,7 @@ What it does NOT do:
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 import aiosqlite
+from src.infrastructure.database.sqlite import connect
 
 from src.domain.entities.member_activity import MemberActivity
 from src.domain.interfaces.activity_repository import ActivityRepository
@@ -37,7 +38,7 @@ class SQLiteActivityRepository(ActivityRepository):
         )
 
     async def get_activity(self, guild_id: str, user_id: str) -> Optional[MemberActivity]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM member_activity WHERE guild_id = ? AND user_id = ?",
@@ -48,7 +49,7 @@ class SQLiteActivityRepository(ActivityRepository):
 
     async def record_message(self, guild_id: str, user_id: str) -> None:
         now_str = datetime.now(timezone.utc).isoformat()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute("""
                 INSERT INTO member_activity (guild_id, user_id, message_count, last_active)
                 VALUES (?, ?, 1, ?)
@@ -60,7 +61,7 @@ class SQLiteActivityRepository(ActivityRepository):
 
     async def record_file_submission(self, guild_id: Optional[str], user_id: str) -> None:
         now_str = datetime.now(timezone.utc).isoformat()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             if guild_id:
                 await db.execute("""
                     INSERT INTO member_activity (guild_id, user_id, files_submitted, last_active)
@@ -81,7 +82,7 @@ class SQLiteActivityRepository(ActivityRepository):
     async def record_task_completed(self, guild_id: str, user_id: str, is_on_time: bool = True) -> None:
         now_str = datetime.now(timezone.utc).isoformat()
         on_time_flag = 1 if is_on_time else 0
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute("""
                 INSERT INTO member_activity (
                     guild_id, user_id, tasks_completed, on_time_tasks,
@@ -104,7 +105,7 @@ class SQLiteActivityRepository(ActivityRepository):
             await db.commit()
 
     async def reset_streak(self, guild_id: str, user_id: str) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute("""
                 UPDATE member_activity
                 SET current_streak = 0
@@ -113,7 +114,7 @@ class SQLiteActivityRepository(ActivityRepository):
             await db.commit()
 
     async def get_guild_standings(self, guild_id: str) -> List[MemberActivity]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM member_activity WHERE guild_id = ?",

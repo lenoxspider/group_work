@@ -9,7 +9,7 @@ What it does NOT do:
 """
 
 from typing import Optional, Dict
-import aiosqlite
+from src.infrastructure.database.sqlite import connect
 from src.domain.entities.channel_binding import ChannelBinding
 from src.domain.interfaces.channel_binding_repository import ChannelBindingRepository
 
@@ -28,7 +28,7 @@ class SQLiteChannelBindingRepository(ChannelBindingRepository):
                 channel_id = excluded.channel_id,
                 updated_at = excluded.updated_at
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(
                 query,
                 (binding.guild_id, binding.channel_key, binding.channel_id, binding.updated_at.isoformat())
@@ -38,7 +38,7 @@ class SQLiteChannelBindingRepository(ChannelBindingRepository):
     async def get_binding(self, guild_id: str, channel_key: str) -> Optional[str]:
         """Retrieves bound Discord channel snowflake ID for a key."""
         query = "SELECT channel_id FROM channel_bindings WHERE guild_id = ? AND channel_key = ?"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (guild_id, channel_key)) as cursor:
                 row = await cursor.fetchone()
                 return str(row[0]) if row else None
@@ -46,7 +46,7 @@ class SQLiteChannelBindingRepository(ChannelBindingRepository):
     async def list_bindings(self, guild_id: str) -> Dict[str, str]:
         """Retrieves all logical channel keys and their bound Discord channel IDs in a guild."""
         query = "SELECT channel_key, channel_id FROM channel_bindings WHERE guild_id = ?"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (guild_id,)) as cursor:
                 rows = await cursor.fetchall()
                 return {row[0]: str(row[1]) for row in rows}
@@ -54,6 +54,6 @@ class SQLiteChannelBindingRepository(ChannelBindingRepository):
     async def delete_binding(self, guild_id: str, channel_key: str) -> None:
         """Removes a binding when a channel is retired."""
         query = "DELETE FROM channel_bindings WHERE guild_id = ? AND channel_key = ?"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(query, (guild_id, channel_key))
             await db.commit()

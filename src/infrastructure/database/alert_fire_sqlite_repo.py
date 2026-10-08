@@ -9,7 +9,7 @@ What it does NOT do:
 """
 
 from typing import List
-import aiosqlite
+from src.infrastructure.database.sqlite import connect
 from src.domain.entities.alert_fire import AlertFire
 from src.domain.interfaces.alert_fire_repository import AlertFireRepository
 
@@ -28,7 +28,7 @@ class SQLiteAlertFireRepository(AlertFireRepository):
             INSERT OR IGNORE INTO alert_fires (task_id, alert_tier, fired_at)
             VALUES (?, ?, ?)
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             cursor = await db.execute(
                 query,
                 (alert_fire.task_id, alert_fire.alert_tier, alert_fire.fired_at.isoformat())
@@ -39,7 +39,7 @@ class SQLiteAlertFireRepository(AlertFireRepository):
     async def has_fired(self, task_id: int, alert_tier: str) -> bool:
         """Checks if a specific tier has already fired for a task."""
         query = "SELECT 1 FROM alert_fires WHERE task_id = ? AND alert_tier = ?"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (task_id, alert_tier)) as cursor:
                 row = await cursor.fetchone()
                 return row is not None
@@ -47,7 +47,7 @@ class SQLiteAlertFireRepository(AlertFireRepository):
     async def list_fired_tiers(self, task_id: int) -> List[str]:
         """Lists all alert tiers that have already fired for a task."""
         query = "SELECT alert_tier FROM alert_fires WHERE task_id = ?"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (task_id,)) as cursor:
                 rows = await cursor.fetchall()
                 return [row[0] for row in rows]

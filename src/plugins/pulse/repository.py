@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-import aiosqlite
+from src.infrastructure.database.sqlite import connect
 
 
 class SQLitePulseRepository:
@@ -10,7 +10,7 @@ class SQLitePulseRepository:
         self.db_path = db_path
 
     async def get_last_fired(self, guild_id: str) -> Optional[str]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(
                 "SELECT last_fired FROM pulse_state WHERE guild_id = ?", (guild_id,)
             ) as cur:
@@ -18,7 +18,7 @@ class SQLitePulseRepository:
                 return row[0] if row else None
 
     async def set_last_fired(self, guild_id: str, ts: str) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO pulse_state (guild_id, last_fired) VALUES (?, ?) "
                 "ON CONFLICT(guild_id) DO UPDATE SET last_fired = excluded.last_fired",

@@ -12,6 +12,7 @@ What it does NOT do:
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 import aiosqlite
+from src.infrastructure.database.sqlite import connect
 
 from src.domain.entities.deadline import Deadline
 from src.domain.interfaces.deadline_repository import DeadlineRepository
@@ -38,7 +39,7 @@ class SQLiteDeadlineRepository(DeadlineRepository):
         )
 
     async def save(self, deadline: Deadline) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute("""
                 INSERT INTO deadlines (
                     deadline_id, guild_id, channel_id, message_id, name,
@@ -63,14 +64,14 @@ class SQLiteDeadlineRepository(DeadlineRepository):
             await db.commit()
 
     async def get_by_id(self, deadline_id: str) -> Optional[Deadline]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM deadlines WHERE deadline_id = ?", (deadline_id,)) as cursor:
                 row = await cursor.fetchone()
                 return self._row_to_entity(dict(row)) if row else None
 
     async def get_active_by_guild(self, guild_id: str) -> List[Deadline]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM deadlines WHERE guild_id = ? AND is_completed = 0 ORDER BY due_datetime ASC",
@@ -80,7 +81,7 @@ class SQLiteDeadlineRepository(DeadlineRepository):
                 return [self._row_to_entity(dict(r)) for r in rows]
 
     async def get_all_active(self) -> List[Deadline]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM deadlines WHERE is_completed = 0 ORDER BY due_datetime ASC"
@@ -90,6 +91,6 @@ class SQLiteDeadlineRepository(DeadlineRepository):
 
     async def update_reminder(self, deadline_id: str, alert_tier: str) -> None:
         col = f"reminded_{alert_tier}"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(f"UPDATE deadlines SET {col} = 1 WHERE deadline_id = ?", (deadline_id,))
             await db.commit()

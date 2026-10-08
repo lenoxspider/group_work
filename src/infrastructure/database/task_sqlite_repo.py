@@ -12,6 +12,7 @@ What it does NOT do:
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 import aiosqlite
+from src.infrastructure.database.sqlite import connect
 
 from src.domain.entities.task import Task
 from src.domain.interfaces.task_repository import TaskRepository
@@ -48,7 +49,7 @@ class SQLiteTaskRepository(TaskRepository):
     async def save(self, task: Task) -> None:
         completed_str = task.completed_at.isoformat() if task.completed_at else None
         verified_str = task.verified_at.isoformat() if task.verified_at else None
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute("""
                 INSERT INTO tasks (
                     task_id, guild_id, channel_id, message_id, description,
@@ -83,14 +84,14 @@ class SQLiteTaskRepository(TaskRepository):
             await db.commit()
 
     async def get_by_id(self, task_id: str) -> Optional[Task]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)) as cursor:
                 row = await cursor.fetchone()
                 return self._row_to_entity(dict(row)) if row else None
 
     async def get_pending_by_guild(self, guild_id: str) -> List[Task]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM tasks WHERE guild_id = ? AND completed_at IS NULL ORDER BY due_date ASC",
@@ -100,7 +101,7 @@ class SQLiteTaskRepository(TaskRepository):
                 return [self._row_to_entity(dict(r)) for r in rows]
 
     async def get_all_pending(self) -> List[Task]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM tasks WHERE completed_at IS NULL ORDER BY due_date ASC"
@@ -115,22 +116,22 @@ class SQLiteTaskRepository(TaskRepository):
             col = "reminded_6h"
         else:
             col = "reminded_1h"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(f"UPDATE tasks SET {col} = 1 WHERE task_id = ?", (task_id,))
             await db.commit()
 
     async def update_progress(self, task_id: str, in_progress: bool) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute("UPDATE tasks SET is_in_progress = ? WHERE task_id = ?", (1 if in_progress else 0, task_id))
             await db.commit()
 
     async def mark_shame_logged(self, task_id: str) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute("UPDATE tasks SET shame_logged = 1 WHERE task_id = ?", (task_id,))
             await db.commit()
 
     async def update_due_date(self, task_id: str, new_due_date: datetime) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute("""
                 UPDATE tasks
                 SET due_date = ?, reminded_24h = 0, reminded_6h = 0, reminded_1h = 0, shame_logged = 0
@@ -141,7 +142,7 @@ class SQLiteTaskRepository(TaskRepository):
     async def get_overdue_unshamed(self, now: Optional[datetime] = None) -> List[Task]:
         now_dt = now or datetime.now(timezone.utc)
         now_str = now_dt.isoformat()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM tasks WHERE completed_at IS NULL AND shame_logged = 0 AND due_date < ?",

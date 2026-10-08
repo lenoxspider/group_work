@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-import aiosqlite
+from src.infrastructure.database.sqlite import connect
 
 from src.plugins.games.domain import (
     ACTIVE_STATUSES,
@@ -45,7 +45,7 @@ class SQLiteGamesRepository:
                 concluded_at = excluded.concluded_at,
                 opened_at = excluded.opened_at
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(
                 query,
                 (
@@ -69,7 +69,7 @@ class SQLiteGamesRepository:
                    entry_fee, winner_id, started_at, concluded_at, opened_at
             FROM games_events WHERE event_id = ?
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (event_id,)) as cur:
                 row = await cur.fetchone()
                 return self._row_to_event(row) if row else None
@@ -83,7 +83,7 @@ class SQLiteGamesRepository:
             WHERE guild_id = ? AND status IN ({placeholders})
             ORDER BY started_at DESC, event_id DESC LIMIT 1
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (guild_id, *ACTIVE_STATUSES)) as cur:
                 row = await cur.fetchone()
                 return self._row_to_event(row) if row else None
@@ -96,7 +96,7 @@ class SQLiteGamesRepository:
             FROM games_events WHERE guild_id = ?
             ORDER BY rowid DESC LIMIT 1
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (guild_id,)) as cur:
                 row = await cur.fetchone()
                 return self._row_to_event(row) if row else None
@@ -131,7 +131,7 @@ class SQLiteGamesRepository:
                 elimination_reason = excluded.elimination_reason,
                 eliminated_at = excluded.eliminated_at
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(
                 query,
                 (
@@ -153,7 +153,7 @@ class SQLiteGamesRepository:
                    survival_streak, elimination_reason, eliminated_at
             FROM games_players WHERE guild_id = ? AND event_id = ? AND user_id = ?
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (guild_id, event_id, user_id)) as cur:
                 row = await cur.fetchone()
                 return self._row_to_player(row) if row else None
@@ -168,13 +168,13 @@ class SQLiteGamesRepository:
         if alive_only:
             query += " AND is_alive = 1"
         query += " ORDER BY player_number ASC"
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, params) as cur:
                 rows = await cur.fetchall()
                 return [self._row_to_player(r) for r in rows]
 
     async def get_next_number(self, guild_id: str, event_id: str) -> str:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(
                 "SELECT player_number FROM games_players WHERE guild_id = ? AND event_id = ?",
                 (guild_id, event_id),
@@ -209,7 +209,7 @@ class SQLiteGamesRepository:
                 choice = excluded.choice,
                 voted_at = excluded.voted_at
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(
                 query,
                 (
@@ -227,7 +227,7 @@ class SQLiteGamesRepository:
             SELECT guild_id, event_id, user_id, choice, voted_at
             FROM games_votes WHERE guild_id = ? AND event_id = ? ORDER BY voted_at ASC
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             async with db.execute(query, (guild_id, event_id)) as cur:
                 rows = await cur.fetchall()
                 return [
@@ -236,7 +236,7 @@ class SQLiteGamesRepository:
                 ]
 
     async def clear_votes(self, guild_id: str, event_id: str) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(
                 "DELETE FROM games_votes WHERE guild_id = ? AND event_id = ?",
                 (guild_id, event_id),
@@ -250,6 +250,6 @@ class SQLiteGamesRepository:
             INSERT INTO games_movement_anomalies (guild_id, event_id, user_id, occurred_at, reason)
             VALUES (?, ?, ?, ?, ?)
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(query, (guild_id, event_id, user_id, utcnow().isoformat(), reason))
             await db.commit()

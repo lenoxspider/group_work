@@ -8,6 +8,7 @@ atomically with their ledger row.
 import uuid
 
 import aiosqlite
+from src.infrastructure.database.sqlite import connect, open_connection
 
 from src.plugins.bank.domain import (
     InsufficientFunds,
@@ -24,7 +25,7 @@ class SQLiteBankRepository:
         self.db_path = db_path
 
     async def get_balance(self, guild_id: str, user_id: str) -> int:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             cur = await db.execute(
                 "SELECT balance FROM bank_accounts WHERE guild_id = ? AND user_id = ?",
                 (guild_id, user_id),
@@ -37,7 +38,7 @@ class SQLiteBankRepository:
 
     async def _open_account(self, guild_id: str, user_id: str) -> None:
         now = utcnow()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(
                 "INSERT OR IGNORE INTO bank_accounts (guild_id, user_id, balance, created_at, updated_at) "
                 "VALUES (?, ?, 0, ?, ?)",
@@ -46,7 +47,7 @@ class SQLiteBankRepository:
             await db.commit()
 
     async def get_tax_rate(self, guild_id: str) -> int:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             cur = await db.execute(
                 "SELECT tax_rate_bps FROM bank_settings WHERE guild_id = ?",
                 (guild_id,),
@@ -55,7 +56,7 @@ class SQLiteBankRepository:
             return row[0] if row else 0
 
     async def set_tax_rate(self, guild_id: str, rate_bps: int) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute(
                 "INSERT INTO bank_settings (guild_id, tax_rate_bps) VALUES (?, ?) "
                 "ON CONFLICT(guild_id) DO UPDATE SET tax_rate_bps = excluded.tax_rate_bps",
@@ -87,7 +88,7 @@ class SQLiteBankRepository:
         now = utcnow()
         tx_id = uuid.uuid4().hex
 
-        db = await aiosqlite.connect(self.db_path)
+        db = await open_connection(self.db_path)
         try:
             await db.execute("BEGIN IMMEDIATE")
 
@@ -161,7 +162,7 @@ class SQLiteBankRepository:
         return Transaction(tx_id, guild_id, from_user, to_user, net, reason, now)
 
     async def ledger(self, guild_id: str, user_id: str, limit: int = 20) -> list[Transaction]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             cur = await db.execute(
                 "SELECT tx_id, guild_id, from_user, to_user, amount, reason, created_at "
                 "FROM bank_transactions "

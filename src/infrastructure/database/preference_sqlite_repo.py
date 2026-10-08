@@ -12,6 +12,7 @@ What it does NOT do:
 from datetime import datetime
 from typing import Optional, Dict, Any
 import aiosqlite
+from src.infrastructure.database.sqlite import connect
 
 from src.domain.entities.member_preference import MemberPreference
 from src.domain.interfaces.preference_repository import PreferenceRepository
@@ -33,7 +34,7 @@ class SQLitePreferenceRepository(PreferenceRepository):
         )
 
     async def save(self, preference: MemberPreference) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute("""
                 INSERT INTO member_preferences (
                     guild_id, user_id, timezone_name, quiet_hours_start, quiet_hours_end, updated_at
@@ -54,7 +55,7 @@ class SQLitePreferenceRepository(PreferenceRepository):
             await db.commit()
 
     async def get_preference(self, guild_id: str, user_id: str) -> Optional[MemberPreference]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM member_preferences WHERE guild_id = ? AND user_id = ?",

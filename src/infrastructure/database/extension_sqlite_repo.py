@@ -12,6 +12,7 @@ What it does NOT do:
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 import aiosqlite
+from src.infrastructure.database.sqlite import connect
 
 from src.domain.entities.extension_request import ExtensionRequest
 from src.domain.interfaces.extension_repository import ExtensionRepository
@@ -46,7 +47,7 @@ class SQLiteExtensionRepository(ExtensionRepository):
         rejections_str = ",".join(sorted(extension.rejections))
         resolved_str = extension.resolved_at.isoformat() if extension.resolved_at else None
 
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute("""
                 INSERT INTO extension_requests (
                     request_id, task_id, guild_id, requester_id,
@@ -67,7 +68,7 @@ class SQLiteExtensionRepository(ExtensionRepository):
             await db.commit()
 
     async def get_by_id(self, request_id: str) -> Optional[ExtensionRequest]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM extension_requests WHERE request_id = ?",
@@ -77,7 +78,7 @@ class SQLiteExtensionRepository(ExtensionRepository):
                 return self._row_to_entity(dict(row)) if row else None
 
     async def get_pending_by_task(self, task_id: str) -> Optional[ExtensionRequest]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM extension_requests WHERE task_id = ? AND status = 'PENDING'",
@@ -87,7 +88,7 @@ class SQLiteExtensionRepository(ExtensionRepository):
                 return self._row_to_entity(dict(row)) if row else None
 
     async def get_pending_by_guild(self, guild_id: str) -> List[ExtensionRequest]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM extension_requests WHERE guild_id = ? AND status = 'PENDING' ORDER BY created_at ASC",

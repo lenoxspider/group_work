@@ -11,6 +11,7 @@ What it does NOT do:
 from datetime import datetime
 from typing import Optional, Dict, Any
 import aiosqlite
+from src.infrastructure.database.sqlite import connect
 
 from src.domain.entities.project_state import ProjectState, ProjectStatus
 from src.domain.interfaces.project_repository import ProjectRepository
@@ -31,7 +32,7 @@ class SQLiteProjectRepository(ProjectRepository):
         )
 
     async def get_state(self, guild_id: str) -> Optional[ProjectState]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM project_state WHERE guild_id = ?",
@@ -42,7 +43,7 @@ class SQLiteProjectRepository(ProjectRepository):
 
     async def save_state(self, state: ProjectState) -> None:
         archived_str = state.archived_at.isoformat() if state.archived_at else None
-        async with aiosqlite.connect(self.db_path) as db:
+        async with connect(self.db_path) as db:
             await db.execute("""
                 INSERT INTO project_state (guild_id, status, archived_at, archived_by)
                 VALUES (?, ?, ?, ?)
