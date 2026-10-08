@@ -1,4 +1,4 @@
-"""Pulse Cog - the scheduler, the silence trigger, and the reaction judge."""
+"""Pulse Cog - the scheduler, the audience trigger, and the win judges."""
 
 import logging
 from typing import Optional
@@ -9,9 +9,9 @@ from discord.ext import commands, tasks
 
 from src.interface.channel_router import ChannelRouter
 from src.plugins.pulse.domain import (
+    AUDIENCE_WINDOW_MINUTES,
     PULSE_COOLDOWN_MINUTES,
     PULSE_PRIZE_SPI,
-    SILENCE_MINUTES,
     utcnow,
 )
 from src.plugins.pulse.modules import normalize
@@ -70,6 +70,9 @@ class PulseCog(commands.Cog, name="Pulse"):
             return
         if self.bot.user and payload.user_id == self.bot.user.id:
             return
+        # Reacting is presence too: a jury voting on a Snap Trial counts as an
+        # audience just as much as someone typing.
+        self._last_activity[str(payload.guild_id)] = utcnow()
         pulse = self.service.active_pulse(str(payload.guild_id))
         if not pulse or pulse.mode != "reaction":
             return
@@ -89,14 +92,31 @@ class PulseCog(commands.Cog, name="Pulse"):
             except Exception:
                 pass
 
+    def _minutes_since_activity(self, guild_id: str) -> Optional[float]:
+        """Minutes since anyone spoke or reacted, or None if we have never seen any."""
+        last = self._last_activity.get(guild_id)
+        if last is None:
+            return None
+        return (utcnow() - last).total_seconds() / 60.0
+
+    def _audience_present(self, guild_id: str) -> bool:
+        """True when someone is demonstrably around to see a pulse land.
+
+        This used to be the opposite: the pulse fired once the hall had gone
+        *quiet*, on the theory that silence meant people lurking who needed a
+        nudge. In practice it fired into an empty room at 03:00, and fired on
+        the first loop tick after every restart because no activity had been
+        recorded yet. A pulse nobody claims trains people to ignore #pulse, so
+        the bot now waits for proof of life instead.
+        """
+        mins = self._minutes_since_activity(guild_id)
+        return mins is not None and mins <= AUDIENCE_WINDOW_MINUTES
+
     async def _should_fire(self, guild_id: str) -> bool:
         secs = await self.service.last_fired_seconds(guild_id)
         if secs is not None and secs < PULSE_COOLDOWN_MINUTES * 60:
             return False
-        last = self._last_activity.get(guild_id)
-        if last is not None and (utcnow() - last).total_seconds() < SILENCE_MINUTES * 60:
-            return False
-        return True
+        return self._audience_present(guild_id)
 
     @tasks.loop(minutes=2)
     async def pulse_loop(self):
@@ -149,15 +169,37 @@ class PulseCog(commands.Cog, name="Pulse"):
             f"⚡ Fired **{pulse.label}**." if pulse else "Could not fire.", ephemeral=True
         )
 
-    @pulse.command(name="status", description="Is a pulse live, and when did the last one fire?")
+    @pulse.command(name="status", description="Is a pulse live, when did the last fire, and is anyone around?")
     async def pulse_status(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         gid = str(interaction.guild_id)
         pulse = self.service.active_pulse(gid)
         secs = await self.service.last_fired_seconds(gid)
-        if pulse:
-            await interaction.followup.send(f"⚡ Live right now: **{pulse.label}**.", ephemeral=True)
-        elif secs is None:
-            await interaction.followup.send("No pulse has fired yet.", ephemeral=True)
+
+        # Surface the audience state: the pulse now refuses to fire into an
+        # empty room, and that is invisible unless it says so.
+        mins = self._minutes_since_activity(gid)
+        if mins is None:
+            audience = (
+                "⌛ No activity seen since the bot last started. The pulse waits for "
+                "someone to speak or react before it fires."
+            )
+        elif mins <= AUDIENCE_WINDOW_MINUTES:
+            audience = (
+                f"👀 **Audience present** - last activity {int(mins)} min ago, inside the "
+                f"{AUDIENCE_WINDOW_MINUTES} min window. A pulse can fire."
+            )
         else:
-            await interaction.followup.send(f"Last pulse was **{int(secs // 60)} min** ago.", ephemeral=True)
+            audience = (
+                f"💤 **No audience** - last activity {int(mins)} min ago, outside the "
+                f"{AUDIENCE_WINDOW_MINUTES} min window. The pulse is waiting rather than "
+                "firing into an empty room."
+            )
+
+        if pulse:
+            head = f"⚡ Live right now: **{pulse.label}**."
+        elif secs is None:
+            head = "No pulse has fired yet."
+        else:
+            head = f"Last pulse was **{int(secs // 60)} min** ago."
+        await interaction.followup.send(f"{head}\n\n{audience}", ephemeral=True)

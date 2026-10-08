@@ -153,7 +153,7 @@ A real court, judged by citizens rather than admins.
 ### 11. ⚡ The Pulse
 The bot is the missing player. When the hall goes quiet it fires a short moment on its own initiative, names a winner, and pays them - so the server has a heartbeat without anyone hosting.
 
-- **Trigger**: fires on silence (30 min quiet), never more than once per 2h. Each module declares its own open window.
+- **Trigger**: fires only when there is an **audience** - someone must have spoken or reacted within the last 25 min - and never more than once per 2h. It used to fire on *silence*, which in practice meant firing into an empty room at 03:00 and on the first tick after every restart; unclaimed pulses just train people to ignore the channel. Each module declares its own open window.
 - **Modules**, rolled at random:
   - 👁️ **Odd One Out** - *reaction* mode. One emoji in a 5×5 grid differs; first to click it wins **100 spi**.
   - 🔐 **Cipher Sprint** - *message* mode. A riddle; the first correct answer typed in chat wins **100 spi**. Answers are normalized and carry aliases, and an expired puzzle reveals its answer.

@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 from typing import Optional
 
 # Pacing (minutes / seconds)
-PULSE_COOLDOWN_MINUTES = 120   # never fire more often than this
-SILENCE_MINUTES = 30           # only fire when the hall has gone quiet this long
-PULSE_TIMEOUT_SECONDS = 90     # default: how long a reflex/riddle pulse stays open
-PULSE_PRIZE_SPI = 100          # reward for a reflex/riddle win
+PULSE_COOLDOWN_MINUTES = 120    # never fire more often than this
+AUDIENCE_WINDOW_MINUTES = 25    # someone must have been active this recently to fire
+PULSE_TIMEOUT_SECONDS = 90      # default: how long a reflex/riddle pulse stays open
+PULSE_PRIZE_SPI = 100           # reward for a reflex/riddle win
 
 # Snap Trial (vote mode)
 SNAP_TIMEOUT_SECONDS = 300     # 5-minute jury window
