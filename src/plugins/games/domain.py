@@ -21,6 +21,7 @@ DEFAULT_ENTRY_FEE = 100
 # members the round is meant to pull in - several citizens hold zero spi.
 HOSTED_ENTRY_FEE = 0
 REGISTRATION_TTL_MINUTES = 30   # abandon an empty registration after this long
+AUTO_START_AFTER_MINUTES = 10   # begin the round this long after opening, if anyone joined
 HOST_COOLDOWN_MINUTES = 720     # never host more often than once per 12h
 
 DIGIT_WORDS = {

@@ -7,11 +7,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from src.domain.errors import AppError
+from src.domain.errors import AppError, ValidationError
 from src.domain.interfaces.audio_deliverer import AudioDeliverer
 from src.domain.interfaces.speech_synthesizer import SpeechSynthesizer
 from src.interface.channel_router import ChannelRouter
 from src.plugins.games.domain import (
+    AUTO_START_AFTER_MINUTES,
     HOSTED_ENTRY_FEE,
     HOST_COOLDOWN_MINUTES,
     REGISTERING,
@@ -132,10 +133,11 @@ class GamesCog(commands.GroupCog, group_name="event"):
             title="○ △ □ THE GAMES ARE OPEN",
             description=(
                 f"The Front Man has opened round `{event.event_id}`. **Entry is free.**\n\n"
-                "Run `/event join` to claim a player number, then `/event start` once "
-                "enough of you have stepped forward.\n\n"
+                "Run `/event join` to claim a player number. You do not have to start it "
+                f"yourselves - the round begins on its own {AUTO_START_AFTER_MINUTES} minutes "
+                "after opening if anyone has stepped forward.\n\n"
                 "Red Light Green Light. Move on green, freeze on red.\n"
-                f"Registration closes in {REGISTRATION_TTL_MINUTES} minutes if nobody joins."
+                f"If nobody joins, registration is abandoned after {REGISTRATION_TTL_MINUTES} minutes."
             ),
             color=discord.Color.from_rgb(255, 0, 144),
         )
@@ -152,38 +154,48 @@ class GamesCog(commands.GroupCog, group_name="event"):
 
     @tasks.loop(minutes=5)
     async def registration_sweep(self):
-        """Cancel registrations nobody joined, so one empty round cannot wedge the arena.
+        """Resolve open registrations so no round can wedge the arena.
 
         An event left in REGISTERING stays in ACTIVE_STATUSES forever and
-        open_event() refuses to create another, so without this the first
-        hosted round that nobody joined would close the arena for good.
+        open_event() refuses to create another one. So every registration is
+        resolved one way or the other: if anyone joined, the round begins on
+        its own; if nobody did, it is cancelled and the arena reopens.
         """
         for guild in self.bot.guilds:
-            gid = str(guild.id)
             try:
-                event = await self.arena.get_active_event(gid)
-                if not event or event.status != REGISTERING or not event.opened_at:
-                    continue
-                age = (utcnow() - event.opened_at).total_seconds() / 60.0
-                if age < REGISTRATION_TTL_MINUTES:
-                    continue
-                if await self.arena.registration_player_count(gid, event.event_id):
-                    continue
-                if not await self.arena.cancel_event(gid):
-                    continue
+                await self._resolve_registration(guild)
             except Exception as e:
-                logger.warning("Registration sweep failed in %s: %s", gid, e)
-                continue
-            logger.info("Cancelled empty registration %s in %s", event.event_id, gid)
-            hub = await self._game_hub(guild)
-            if hub:
-                try:
-                    await hub.send(
-                        f"⌛ Registration for `{event.event_id}` closed - nobody stepped "
-                        "forward. The arena is open again."
-                    )
-                except Exception:
-                    pass
+                logger.warning("Registration sweep failed in %s: %s", guild.id, e)
+
+    async def _resolve_registration(self, guild: discord.Guild) -> None:
+        gid = str(guild.id)
+        event = await self.arena.get_active_event(gid)
+        if not event or event.status != REGISTERING or not event.opened_at:
+            return
+        age = (utcnow() - event.opened_at).total_seconds() / 60.0
+        players = await self.arena.registration_player_count(gid, event.event_id)
+
+        if players:
+            if age < AUTO_START_AFTER_MINUTES:
+                return
+            await self._begin_round(guild)
+            logger.info("Auto-started %s in %s with %s player(s)", event.event_id, gid, players)
+            return
+
+        if age < REGISTRATION_TTL_MINUTES:
+            return
+        if not await self.arena.cancel_event(gid):
+            return
+        logger.info("Cancelled empty registration %s in %s", event.event_id, gid)
+        hub = await self._game_hub(guild)
+        if hub:
+            try:
+                await hub.send(
+                    f"⌛ Registration for `{event.event_id}` closed - nobody stepped "
+                    "forward. The arena is open again."
+                )
+            except Exception:
+                pass
 
     @registration_sweep.before_loop
     async def before_registration_sweep(self):
@@ -234,6 +246,36 @@ class GamesCog(commands.GroupCog, group_name="event"):
         except AppError as e:
             await interaction.followup.send(f"{e.message}", ephemeral=True)
 
+    async def _begin_round(self, guild: discord.Guild) -> None:
+        """Lock registration and launch Round 1.
+
+        Shared by `/event start` and the registration sweep, so a round the bot
+        starts on its own behaves exactly like one a human starts.
+        """
+        guild_id = str(guild.id)
+        running = self._running_tasks.get(guild_id)
+        if running and not running.done():
+            raise ValidationError("A game is already in progress.")
+
+        await self.arena.start_event(guild_id)
+
+        hub = await self._game_hub(guild)
+        if not hub:
+            raise ValidationError("No #game-hub channel to run the round in.")
+
+        try:
+            await hub.send(
+                "**Round 1: Red Light Green Light.** The doll is watching. "
+                "Use `/move` or the MOVE button."
+            )
+        except Exception as e:
+            logger.warning("Could not announce round start in %s: %s", guild_id, e)
+
+        task = self.bot.loop.create_task(
+            self.runner.run(hub, guild_id, on_cleanup=lambda gid: self._running_tasks.pop(gid, None))
+        )
+        self._running_tasks[guild_id] = task
+
     @app_commands.command(name="start", description="Lock registration and begin Round 1 (Red Light Green Light)")
     async def start(self, interaction: discord.Interaction):
         try:
@@ -243,24 +285,14 @@ class GamesCog(commands.GroupCog, group_name="event"):
 
         if not await self._ensure_game_hub(interaction):
             return
-
-        guild_id = str(interaction.guild_id)
-        if guild_id in self._running_tasks and not self._running_tasks[guild_id].done():
-            await interaction.followup.send("A game is already in progress.", ephemeral=True)
+        if not interaction.guild:
+            await interaction.followup.send("Arena commands only work inside the server.", ephemeral=True)
             return
 
         try:
-            event = await self.arena.start_event(guild_id)
+            await self._begin_round(interaction.guild)
         except AppError as e:
             await interaction.followup.send(f"{e.message}", ephemeral=True)
-            return
-
-        hub = await self.channel_router.resolve(interaction.guild, "game-hub") if self.channel_router and interaction.guild else interaction.channel
-        await interaction.followup.send("**Round 1: Red Light Green Light.** The doll is watching. Use `/move` or the MOVE button.")
-        task = self.bot.loop.create_task(
-            self.runner.run(hub, guild_id, on_cleanup=lambda gid: self._running_tasks.pop(gid, None))
-        )
-        self._running_tasks[guild_id] = task
 
     @app_commands.command(name="status", description="View the arena pot, survivors, and current game")
     async def status(self, interaction: discord.Interaction):
