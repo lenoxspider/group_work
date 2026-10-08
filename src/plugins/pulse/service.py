@@ -39,8 +39,35 @@ class PulseService:
     def active_pulse(self, guild_id: str) -> Optional[ActivePulse]:
         return self.active.get(guild_id)
 
-    def clear(self, guild_id: str) -> None:
+    async def clear(self, guild_id: str) -> None:
+        """Forget the live pulse in memory and on disk."""
         self.active.pop(guild_id, None)
+        try:
+            await self.repo.clear_active(guild_id)
+        except Exception as e:
+            logger.warning("Could not clear persisted pulse for %s: %s", guild_id, e)
+
+    async def restore(self) -> int:
+        """Reload persisted pulses after a restart.
+
+        Called from the plugin's on_setup hook. Expired pulses are left in place
+        rather than resolved here: the scheduler's next tick handles them through
+        the normal path, which is the same code that would have run had the bot
+        never gone down.
+        """
+        try:
+            pulses = await self.repo.list_active()
+        except Exception as e:
+            logger.warning("Could not restore persisted pulses: %s", e)
+            return 0
+        for pulse in pulses:
+            self.active[pulse.guild_id] = pulse
+        if pulses:
+            logger.info(
+                "Restored %s live pulse(s) across a restart: %s",
+                len(pulses), ", ".join(f"{p.label} in {p.guild_id}" for p in pulses),
+            )
+        return len(pulses)
 
     async def fire(self, guild_id: str, channel) -> Optional[ActivePulse]:
         if self.active.get(guild_id):
@@ -79,6 +106,12 @@ class PulseService:
             data=spec.get("data", {}),
         )
         self.active[guild_id] = pulse
+        try:
+            await self.repo.save_active(pulse)
+        except Exception as e:
+            # The pulse is live in memory regardless; persistence only matters
+            # for surviving a restart, so a write failure must not lose the round.
+            logger.warning("Could not persist live pulse for %s: %s", guild_id, e)
         await self.repo.set_last_fired(guild_id, utcnow().isoformat())
         return pulse
 

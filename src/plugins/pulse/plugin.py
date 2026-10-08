@@ -42,3 +42,9 @@ class PulsePlugin(Plugin):
 
     def build_cogs(self, bot) -> list:
         return [PulseCog(bot, self.service, channel_router=bot.channel_router)]
+
+    async def on_setup(self, bot) -> None:
+        # Runs after the cogs are mounted but before the bot connects, so a pulse
+        # that was live across a restart is back in memory before the scheduler's
+        # first tick can fire a second one on top of it.
+        await self.service.restore()

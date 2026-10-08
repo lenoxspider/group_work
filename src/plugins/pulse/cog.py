@@ -54,7 +54,7 @@ class PulseCog(commands.Cog, name="Pulse"):
             return
         if normalize(message.content) not in pulse.accept:
             return
-        self.service.clear(gid)
+        await self.service.clear(gid)
         await self.service.grant(gid, str(message.author.id))
         try:
             await message.reply(f"🏆 Credited — **+{PULSE_PRIZE_SPI} spi** · win *{pulse.label}*.")
@@ -77,7 +77,7 @@ class PulseCog(commands.Cog, name="Pulse"):
             return
         if str(payload.emoji) != pulse.answer:
             return
-        self.service.clear(str(payload.guild_id))
+        await self.service.clear(str(payload.guild_id))
         await self.service.grant(str(payload.guild_id), str(payload.user_id))
         channel = self.bot.get_channel(int(pulse.channel_id))
         if channel:
@@ -118,7 +118,7 @@ class PulseCog(commands.Cog, name="Pulse"):
             pulse = self.service.active_pulse(gid)
             if pulse:
                 if pulse.is_expired():
-                    self.service.clear(gid)
+                    await self.service.clear(gid)
                     ch = self.bot.get_channel(int(pulse.channel_id))
                     if ch:
                         try:
