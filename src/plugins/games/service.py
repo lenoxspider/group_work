@@ -28,6 +28,7 @@ from src.plugins.games.domain import (
     utcnow,
 )
 from src.plugins.games.game import Game, get_games
+from src.plugins.games.glass_bridge import NoActiveBridge, NotYourTurn
 from src.plugins.games.repository import SQLiteGamesRepository
 
 
@@ -118,16 +119,20 @@ class ArenaService:
 
     # --- Event lifecycle ---
 
-    async def open_event(self, guild_id: str, entry_fee: Optional[int] = None) -> Event:
+    async def open_event(
+        self, guild_id: str, entry_fee: Optional[int] = None, game_index: int = 0
+    ) -> Event:
         active = await self.repo.get_active_event(guild_id)
         if active:
             raise ValidationError("An event is already in progress. Conclude it first.")
         fee = DEFAULT_ENTRY_FEE if entry_fee is None else max(0, entry_fee)
+        index = max(0, min(game_index, len(self.games) - 1)) if self.games else 0
         event = Event(
             event_id=f"EV-{uuid.uuid4().hex[:8].upper()}",
             guild_id=guild_id,
             status=REGISTERING,
             entry_fee=fee,
+            current_game_index=index,
             opened_at=utcnow(),
         )
         await self.repo.save_event(event)
@@ -204,8 +209,12 @@ class ArenaService:
 
         event.begin()
         await self.repo.save_event(event)
-        if self.game:
-            self.game.start(guild_id, event.event_id, target=self.game.target)
+        game = self._game_at(event.current_game_index)
+        if game:
+            if getattr(game, "kind", "timed") == "turn":
+                game.start(guild_id, event.event_id, players=[p.user_id for p in alive])
+            else:
+                game.start(guild_id, event.event_id, target=game.target)
         return event
 
     # --- Elimination (game-driven, event-scoped) ---
@@ -328,8 +337,8 @@ class ArenaService:
         event.conclude(winner_id)
         await self.repo.save_event(event)
 
-        if self.game:
-            self.game.end(guild_id)
+        for game in self.games:
+            game.end(guild_id)
 
         return ConcludeResult(
             guild_id=guild_id,
@@ -360,7 +369,19 @@ class ArenaService:
             entry_fee=event.entry_fee,
         )
 
-    # --- Game delegation (round 1 = RLGL) ---
+    # --- Game delegation ---
+
+    def _game_at(self, index: int):
+        if not self.games:
+            return None
+        return self.games[max(0, min(index, len(self.games) - 1))]
+
+    async def current_game(self, guild_id: str):
+        """The game an event is actually running, by its selected index."""
+        event = await self.repo.get_active_event(guild_id)
+        if not event:
+            return None
+        return self._game_at(event.current_game_index)
 
     def start_game(self, guild_id: str, event_id: str) -> None:
         if self.game:
@@ -392,6 +413,23 @@ class ArenaService:
             raise ValidationError("No game module registered.")
         return await self.game.handle_move(guild_id, user_id, clicked_at=clicked_at)
 
+    async def handle_choice(self, guild_id: str, user_id: str, side: str):
+        """A turn-game choice (Glass Bridge: left or right)."""
+        game = await self.current_game(guild_id)
+        if not game:
+            raise ValidationError("No game is running.")
+        try:
+            return game.handle_choice(guild_id, user_id, side)
+        except (NotYourTurn, NoActiveBridge, ValueError) as e:
+            raise ValidationError(str(e))
+
+    async def handle_stall(self, guild_id: str):
+        """The current player never chose within the turn window."""
+        game = await self.current_game(guild_id)
+        if not game:
+            return None
+        return game.handle_stall(guild_id)
+
     async def clear_session(self, guild_id: str) -> None:
-        if self.game:
-            self.game.end(guild_id)
+        for game in self.games:
+            game.end(guild_id)
