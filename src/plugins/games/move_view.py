@@ -38,7 +38,7 @@ class MoveView(discord.ui.View):
         user_id = str(interaction.user.id)
 
         try:
-            res = await self.arena.handle_move(guild_id, user_id)
+            res = await self.arena.handle_move(guild_id, user_id, clicked_at=interaction.created_at)
             feedback = build_ephemeral_move_feedback(res)
             await interaction.followup.send(feedback, ephemeral=True)
         except Exception as e:

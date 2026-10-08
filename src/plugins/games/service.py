@@ -387,10 +387,10 @@ class ArenaService:
     async def get_active_racers(self, guild_id: str):
         return await self.game.get_active_racers(guild_id) if self.game else []
 
-    async def handle_move(self, guild_id: str, user_id: str):
+    async def handle_move(self, guild_id: str, user_id: str, clicked_at=None):
         if not self.game:
             raise ValidationError("No game module registered.")
-        return await self.game.handle_move(guild_id, user_id)
+        return await self.game.handle_move(guild_id, user_id, clicked_at=clicked_at)
 
     async def clear_session(self, guild_id: str) -> None:
         if self.game:

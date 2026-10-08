@@ -129,7 +129,7 @@ A self-contained arena where the team plays entry-fee elimination games for the 
   - `/event conclude` - resolve the event and pay out the pot.
   - `/move` - advance in Red Light Green Light (safe only during `GREEN LIGHT`, or tap the MOVE button).
 - **Economy (zero-inflation escrow)**: entry fees transfer into a `POT` account in the bank (tax-exempt). No minting or burning - the pot is just the sum of entry fees, paid out on conclusion. Last survivor takes all, or the survivors split it evenly. On total extinction the pot carries to the next event.
-- **Red Light Green Light (Round 1)**: a 5-round, timed state machine. Move on green, freeze on red. Move during red light (outside the 0.5s latency grace window) or fail to cross the 100m line before time expires, and you're eliminated with guard voice (`Player zero six seven. Eliminated.`).
+- **Red Light Green Light (Round 1)**: a 5-round, timed state machine. Move on green, freeze on red. Moves on red are judged by **when you clicked** (`interaction.created_at`), not when the bot received it, so a click made during green is safe even if it arrives after the flip. A 1.5s grace window covers display propagation (0.8s if you sprinted - momentum costs you your margin, and the elimination message says so). Fail to cross the 100m line in time and you're eliminated with guard voice (`Player zero six seven. Eliminated.`).
 - **Decoupled from accountability**: games never touch your homework. Overdue tasks hit your spi balance and the Wall of Shame, never the arena.
 
 ### 9. 🐱 Community, Citizenship & Onboarding

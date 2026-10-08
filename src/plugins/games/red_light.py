@@ -8,9 +8,17 @@ Elimination is delegated to the arena, which owns the roster and pot.
 import random
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Callable, List, Optional
 
 from src.plugins.games.game import Game
+
+# Grace after the light flips, judged by when the player clicked rather than
+# when the bot received the click. Sized for real Discord latency: edit
+# propagation + human reaction. The sprint trade-off is preserved - a tighter
+# window - but 0.2s was only ever winnable on a perfect connection.
+GRACE_SECONDS = 1.5
+SPRINT_GRACE_SECONDS = 0.8
 
 
 @dataclass(frozen=True)
@@ -35,9 +43,16 @@ class RedLightGreenLight(Game):
     name = "Red Light Green Light"
     description = "Move on green light, freeze on red. Move on red and you are eliminated."
 
-    def __init__(self, arena, clock: Optional[Callable[[], float]] = None, rng: Optional[random.Random] = None):
+    def __init__(
+        self,
+        arena,
+        clock: Optional[Callable[[], float]] = None,
+        rng: Optional[random.Random] = None,
+        wall_clock: Optional[Callable[[], datetime]] = None,
+    ):
         super().__init__(arena)
         self.clock = clock or time.monotonic
+        self.wall_clock = wall_clock or (lambda: datetime.now(timezone.utc))
         self.rng = rng or random.Random()
         self._active_games: dict = {}
 
@@ -50,6 +65,7 @@ class RedLightGreenLight(Game):
             "finished": set(),
             "round": 1,
             "red_light_time": 0.0,
+            "red_light_wall": None,
             "round_moves": {},
             "sprinting": set(),
             "last_taps": {},
@@ -68,6 +84,7 @@ class RedLightGreenLight(Game):
         game["board_dirty"] = True
         if clean == "RED":
             game["red_light_time"] = self.clock()
+            game["red_light_wall"] = self.wall_clock()
             game["eliminated_this_round"] = []
         else:
             game["round_moves"] = {}
@@ -109,7 +126,20 @@ class RedLightGreenLight(Game):
         base_max = max(12, 26 - (round_num - 1) * 2)
         return self.rng.randint(base_min, base_max)
 
-    async def handle_move(self, guild_id: str, user_id: str) -> MoveResult:
+    def _click_wall(self, clicked_at: Optional[datetime]) -> datetime:
+        """The player's click as a wall-clock time.
+
+        Discord stamps interactions when the user clicks, so this is earlier than
+        bot-receipt time and is the honest moment to judge a red-light move
+        against. Naive values are assumed to be UTC.
+        """
+        if clicked_at is None:
+            return self.wall_clock()
+        if clicked_at.tzinfo is None:
+            return clicked_at.replace(tzinfo=timezone.utc)
+        return clicked_at
+
+    async def handle_move(self, guild_id: str, user_id: str, clicked_at: Optional[datetime] = None) -> MoveResult:
         game = self._active_games.get(guild_id)
         if not game:
             raise ValueError("No Red Light Green Light game is currently active.")
@@ -141,31 +171,44 @@ class RedLightGreenLight(Game):
         last_taps[user_id] = now
 
         if game["light"] == "RED":
-            return await self._eval_red_move(game, player, event_id, guild_id, user_id, now)
+            return await self._eval_red_move(game, player, event_id, guild_id, user_id, self._click_wall(clicked_at))
         return await self._eval_green_move(game, player, guild_id, user_id)
 
-    async def _eval_red_move(self, game, player, event_id, guild_id, user_id, now) -> MoveResult:
-        red_start = game.get("red_light_time", 0.0)
-        elapsed = now - red_start if red_start > 0 else 999.0
+    async def _eval_red_move(self, game, player, event_id, guild_id, user_id, clicked_at: datetime) -> MoveResult:
+        red_wall = game.get("red_light_wall")
         is_sprinting = user_id in game.get("sprinting", set())
-        grace_window = 0.2 if is_sprinting else 0.5
+        grace_window = SPRINT_GRACE_SECONDS if is_sprinting else GRACE_SECONDS
+
+        if red_wall is None:
+            # No recorded flip (a game started before this landed). Never
+            # eliminate on missing data.
+            elapsed = 0.0
+        else:
+            elapsed = (clicked_at - red_wall).total_seconds()
+
+        # A negative elapsed means the click was made before the light flipped
+        # server-side - the player saw green - so it is safe by definition.
+        shown = max(elapsed, 0.0)
 
         if elapsed <= grace_window:
             await self.arena.repo.record_anomaly(
                 guild_id, event_id, user_id,
-                f"Close call ({elapsed:.2f}s latency grace, sprint={is_sprinting})",
+                f"Close call ({shown:.2f}s after the flip by click time, sprint={is_sprinting})",
             )
-            penalty_note = " (Sprint momentum: 0.2s grace)" if is_sprinting else ""
+            penalty_note = (
+                f" Sprint momentum shrinks that window to {SPRINT_GRACE_SECONDS}s."
+                if is_sprinting else ""
+            )
             return MoveResult(
                 guild_id=guild_id, user_id=user_id, player_number=player.player_number,
                 survived=True, distance=game["progress"].get(user_id, 0), is_finished=False,
                 status_code="grace",
-                status_message=f"Close call! Stopped within {elapsed:.2f}s grace window{penalty_note}. Freeze immediately!",
+                status_message=f"Close call! Your move landed {shown:.2f}s after the red light.{penalty_note} Freeze immediately!",
             )
 
         await self.arena.repo.record_anomaly(
             guild_id, event_id, user_id,
-            f"Moved during Red Light ({elapsed:.2f}s elapsed, sprint={is_sprinting})",
+            f"Moved during Red Light ({shown:.2f}s after the flip by click time, sprint={is_sprinting})",
         )
         audio_bytes = None
         elim_res = await self.arena.eliminate_player(guild_id, user_id, "Moved during Red Light")
@@ -177,7 +220,11 @@ class RedLightGreenLight(Game):
             guild_id=guild_id, user_id=user_id, player_number=player.player_number,
             survived=False, distance=game["progress"].get(user_id, 0), is_finished=False,
             status_code="eliminated",
-            status_message="Movement detected during Red Light! You have been eliminated.",
+            status_message=(
+                f"Movement detected {shown:.2f}s after the red light"
+                + (f" (sprint momentum shrinks the grace window to {SPRINT_GRACE_SECONDS}s)" if is_sprinting else "")
+                + ". You have been eliminated."
+            ),
             audio_bytes=audio_bytes,
         )
 

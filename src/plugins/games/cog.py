@@ -414,7 +414,7 @@ class MoveCog(commands.Cog, name="Movement"):
         user_id = str(interaction.user.id)
 
         try:
-            res = await self.arena.handle_move(guild_id, user_id)
+            res = await self.arena.handle_move(guild_id, user_id, clicked_at=interaction.created_at)
             if not res.survived and interaction.guild and isinstance(interaction.user, discord.Member):
                 p_role = discord.utils.get(interaction.guild.roles, name="Player")
                 s_role = discord.utils.get(interaction.guild.roles, name="Spectator")
