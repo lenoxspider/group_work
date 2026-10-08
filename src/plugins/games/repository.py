@@ -33,8 +33,8 @@ class SQLiteGamesRepository:
         query = """
             INSERT INTO games_events (
                 event_id, guild_id, status, pot_amount, current_game_index,
-                entry_fee, winner_id, started_at, concluded_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                entry_fee, winner_id, started_at, concluded_at, opened_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(event_id) DO UPDATE SET
                 status = excluded.status,
                 pot_amount = excluded.pot_amount,
@@ -42,7 +42,8 @@ class SQLiteGamesRepository:
                 entry_fee = excluded.entry_fee,
                 winner_id = excluded.winner_id,
                 started_at = excluded.started_at,
-                concluded_at = excluded.concluded_at
+                concluded_at = excluded.concluded_at,
+                opened_at = excluded.opened_at
         """
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
@@ -57,6 +58,7 @@ class SQLiteGamesRepository:
                     event.winner_id,
                     event.started_at.isoformat() if event.started_at else None,
                     event.concluded_at.isoformat() if event.concluded_at else None,
+                    event.opened_at.isoformat() if event.opened_at else None,
                 ),
             )
             await db.commit()
@@ -64,7 +66,7 @@ class SQLiteGamesRepository:
     async def get_event(self, event_id: str) -> Optional[Event]:
         query = """
             SELECT event_id, guild_id, status, pot_amount, current_game_index,
-                   entry_fee, winner_id, started_at, concluded_at
+                   entry_fee, winner_id, started_at, concluded_at, opened_at
             FROM games_events WHERE event_id = ?
         """
         async with aiosqlite.connect(self.db_path) as db:
@@ -76,13 +78,26 @@ class SQLiteGamesRepository:
         placeholders = ",".join("?" for _ in ACTIVE_STATUSES)
         query = f"""
             SELECT event_id, guild_id, status, pot_amount, current_game_index,
-                   entry_fee, winner_id, started_at, concluded_at
+                   entry_fee, winner_id, started_at, concluded_at, opened_at
             FROM games_events
             WHERE guild_id = ? AND status IN ({placeholders})
             ORDER BY started_at DESC, event_id DESC LIMIT 1
         """
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute(query, (guild_id, *ACTIVE_STATUSES)) as cur:
+                row = await cur.fetchone()
+                return self._row_to_event(row) if row else None
+
+    async def get_last_event(self, guild_id: str) -> Optional[Event]:
+        """Most recent event in any status, used to rate-limit hosted rounds."""
+        query = """
+            SELECT event_id, guild_id, status, pot_amount, current_game_index,
+                   entry_fee, winner_id, started_at, concluded_at, opened_at
+            FROM games_events WHERE guild_id = ?
+            ORDER BY rowid DESC LIMIT 1
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(query, (guild_id,)) as cur:
                 row = await cur.fetchone()
                 return self._row_to_event(row) if row else None
 
@@ -98,6 +113,7 @@ class SQLiteGamesRepository:
             winner_id=row[6],
             started_at=_parse_dt(row[7]),
             concluded_at=_parse_dt(row[8]),
+            opened_at=_parse_dt(row[9]),
         )
 
     # --- Players ---

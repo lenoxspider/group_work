@@ -4,9 +4,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
-# Pacing (minutes / seconds)
+# Pacing (minutes / seconds). The audience window lives in
+# src/interface/presence.py because the arena host loop shares it.
 PULSE_COOLDOWN_MINUTES = 120    # never fire more often than this
-AUDIENCE_WINDOW_MINUTES = 25    # someone must have been active this recently to fire
 PULSE_TIMEOUT_SECONDS = 90      # default: how long a reflex/riddle pulse stays open
 PULSE_PRIZE_SPI = 100           # reward for a reflex/riddle win
 

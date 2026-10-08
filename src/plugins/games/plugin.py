@@ -9,14 +9,17 @@ from src.interface.channel_manager import ChannelDecl
 from src.plugins.base import Plugin
 from src.plugins.games.cog import GamesCog, MoveCog
 from src.plugins.games.repository import SQLiteGamesRepository
-from src.plugins.games.schema import GAMES_SCHEMA
+from src.plugins.games.schema import GAMES_MIGRATIONS, GAMES_SCHEMA
 from src.plugins.games.service import ArenaService
 
 
 class GamesPlugin(Plugin):
     name = "games"
     title = "🎮 Games Arena"
-    summary = "Entry-fee Squid Game events. Pay spi, survive Red Light Green Light, split the pot."
+    summary = (
+        "Squid Game events. The bot hosts free-entry rounds when an audience is "
+        "present; survive Red Light Green Light and split the pot."
+    )
     guide = [
         ("/event open [entry_fee]", "Open a new event. Entry fee defaults to 100 spi"),
         ("/event join", "Pay the entry fee and claim a player number (001-456)"),
@@ -27,7 +30,7 @@ class GamesPlugin(Plugin):
         ("/move", "Advance in Red Light Green Light (safe on green only)"),
     ]
     schema = GAMES_SCHEMA
-    migrations = []
+    migrations = GAMES_MIGRATIONS
 
     def __init__(self, bot):
         self.bot = bot

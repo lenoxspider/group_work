@@ -1,4 +1,4 @@
-"""Unit tests for the pulse audience trigger.
+"""Unit tests for the shared presence tracker and the pulse audience trigger.
 
 The pulse used to fire when the hall went *quiet*, on the theory that silence
 meant people lurking who needed a nudge. In practice it fired into an empty
@@ -12,16 +12,18 @@ recently enough to actually see it land.
 
 import unittest
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from src.interface.presence import AUDIENCE_WINDOW_MINUTES, PresenceTracker
 from src.plugins.pulse.cog import PulseCog
-from src.plugins.pulse.domain import AUDIENCE_WINDOW_MINUTES, PULSE_COOLDOWN_MINUTES, utcnow
+from src.plugins.pulse.domain import PULSE_COOLDOWN_MINUTES, utcnow
 
 
 def _cog(last_fired_seconds=None) -> PulseCog:
     """Build a PulseCog without __init__, which would start the task loop."""
     cog = object.__new__(PulseCog)
-    cog._last_activity = {}
+    cog.bot = SimpleNamespace(presence=PresenceTracker())
     service = AsyncMock()
     service.last_fired_seconds = AsyncMock(return_value=last_fired_seconds)
     cog.service = service
@@ -29,7 +31,35 @@ def _cog(last_fired_seconds=None) -> PulseCog:
 
 
 def _active_minutes_ago(cog: PulseCog, guild_id: str, minutes: float) -> None:
-    cog._last_activity[guild_id] = utcnow() - timedelta(minutes=minutes)
+    cog.bot.presence.note(guild_id, utcnow() - timedelta(minutes=minutes))
+
+
+class TestPresenceTracker(unittest.TestCase):
+    def test_no_history_is_not_an_audience(self):
+        tracker = PresenceTracker()
+        self.assertIsNone(tracker.minutes_since("g1"))
+        self.assertFalse(tracker.audience_present("g1"))
+
+    def test_recent_activity_is_an_audience(self):
+        tracker = PresenceTracker()
+        tracker.note("g1")
+        self.assertTrue(tracker.audience_present("g1"))
+
+    def test_stale_activity_is_not_an_audience(self):
+        tracker = PresenceTracker()
+        tracker.note("g1", utcnow() - timedelta(minutes=AUDIENCE_WINDOW_MINUTES + 1))
+        self.assertFalse(tracker.audience_present("g1"))
+
+    def test_guilds_are_tracked_separately(self):
+        tracker = PresenceTracker()
+        tracker.note("g1")
+        self.assertTrue(tracker.audience_present("g1"))
+        self.assertFalse(tracker.audience_present("g2"))
+
+    def test_window_is_configurable(self):
+        tracker = PresenceTracker(window_minutes=5)
+        tracker.note("g1", utcnow() - timedelta(minutes=10))
+        self.assertFalse(tracker.audience_present("g1"))
 
 
 class TestPulseAudienceTrigger(unittest.IsolatedAsyncioTestCase):

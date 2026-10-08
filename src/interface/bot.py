@@ -24,6 +24,7 @@ from src.infrastructure.speech.espeak_synthesizer import EspeakSpeechSynthesizer
 from src.infrastructure.speech.attachment_deliverer import AttachmentAudioDeliverer
 from src.interface.channel_router import ChannelRouter
 from src.interface.channel_manager import ChannelManager
+from src.interface.presence import PresenceTracker
 
 from src.plugins import get_plugins
 
@@ -59,6 +60,10 @@ class GroupAccountabilityBot(commands.Bot):
         self.channel_binding_repo = SQLiteChannelBindingRepository(settings.database_path)
         self.channel_router = ChannelRouter(self, self.channel_binding_repo)
         self.channel_manager = ChannelManager(self, self.channel_router)
+
+        # Shared presence signal: bot-initiated features ask this before firing,
+        # so they land on an audience instead of into an empty room.
+        self.presence = PresenceTracker()
 
         # Plugin runtime: every feature self-registers schema, services, and cogs
         self.plugins = {}

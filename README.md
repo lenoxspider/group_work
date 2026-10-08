@@ -119,6 +119,7 @@ This project strictly adheres to Domain-Driven Design (DDD) and Clean Architectu
 A self-contained arena where the team plays entry-fee elimination games for the spi pot. The arena is game-agnostic: survivors fight for the escrowed pot, and games register as modules (currently just Round 1).
 
 - **Channels**: `#game-hub` (active players) and `#spectators` (eliminated contestants).
+- **Bot-hosted rounds**: the bot opens a round on its own when there is an **audience** (someone active in the last 25 min), at most once per 12h, and pings `@here` in `#game-hub`. Hosted rounds are **free to enter**, because a fee would exclude exactly the members the round is meant to pull in. A registration nobody joins is cancelled automatically after 30 minutes - otherwise it would sit in `ACTIVE_STATUSES` forever and block every future round.
 - **Commands**:
   - `/event open [entry_fee:<int>]` - open registration for a new event. Entry fee defaults to `100 spi`.
   - `/event join` - pay the entry fee and claim a player number (`001`-`456`).

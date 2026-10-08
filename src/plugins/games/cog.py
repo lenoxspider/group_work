@@ -5,12 +5,19 @@ from typing import Optional, Literal
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from src.domain.errors import AppError
 from src.domain.interfaces.audio_deliverer import AudioDeliverer
 from src.domain.interfaces.speech_synthesizer import SpeechSynthesizer
 from src.interface.channel_router import ChannelRouter
+from src.plugins.games.domain import (
+    HOSTED_ENTRY_FEE,
+    HOST_COOLDOWN_MINUTES,
+    REGISTERING,
+    REGISTRATION_TTL_MINUTES,
+    utcnow,
+)
 from src.plugins.games.formatters import (
     build_elimination_embed,
     build_enrollment_embed,
@@ -48,8 +55,12 @@ class GamesCog(commands.GroupCog, group_name="event"):
     async def cog_load(self):
         self.bot.add_view(MoveView(self.arena, self.channel_router))
         self.arena.reset_all_games()
+        self.host_loop.start()
+        self.registration_sweep.start()
 
     def cog_unload(self):
+        self.host_loop.cancel()
+        self.registration_sweep.cancel()
         for task in self._running_tasks.values():
             task.cancel()
 
@@ -77,6 +88,106 @@ class GamesCog(commands.GroupCog, group_name="event"):
                 await member.add_roles(s_role, reason="Moved to Spectator deck")
         except Exception as e:
             logger.warning("Could not swap role to Spectator for %s: %s", user_id, e)
+
+    # --- Bot-hosted rounds ---
+
+    async def _game_hub(self, guild: discord.Guild):
+        if self.channel_router:
+            return await self.channel_router.resolve(guild, "game-hub")
+        return discord.utils.get(guild.text_channels, name="game-hub")
+
+    @tasks.loop(minutes=10)
+    async def host_loop(self):
+        """Open a free-entry round when there is an audience to play it.
+
+        The arena had never been used: `/event open` is opt-in and nobody
+        remembers to run it. Entry is free because a fee would exclude exactly
+        the members this is meant to pull in - several citizens hold zero spi.
+        """
+        for guild in self.bot.guilds:
+            gid = str(guild.id)
+            try:
+                if await self.arena.get_active_event(gid):
+                    continue
+                if not self.bot.presence.audience_present(gid):
+                    continue
+                since = await self.arena.seconds_since_last_event(gid)
+                if since is not None and since < HOST_COOLDOWN_MINUTES * 60:
+                    continue
+                event = await self.arena.open_event(gid, HOSTED_ENTRY_FEE)
+            except Exception as e:
+                logger.warning("Could not host an arena round in %s: %s", gid, e)
+                continue
+            await self._announce_hosted_round(guild, event)
+
+    @host_loop.before_loop
+    async def before_host_loop(self):
+        await self.bot.wait_until_ready()
+
+    async def _announce_hosted_round(self, guild: discord.Guild, event) -> None:
+        hub = await self._game_hub(guild)
+        if not hub:
+            return
+        embed = discord.Embed(
+            title="○ △ □ THE GAMES ARE OPEN",
+            description=(
+                f"The Front Man has opened round `{event.event_id}`. **Entry is free.**\n\n"
+                "Run `/event join` to claim a player number, then `/event start` once "
+                "enough of you have stepped forward.\n\n"
+                "Red Light Green Light. Move on green, freeze on red.\n"
+                f"Registration closes in {REGISTRATION_TTL_MINUTES} minutes if nobody joins."
+            ),
+            color=discord.Color.from_rgb(255, 0, 144),
+        )
+        try:
+            # @here, not @everyone: the round only opens when an audience is
+            # already present, so ping the people who are actually awake.
+            await hub.send(
+                content="@here",
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions(everyone=True),
+            )
+        except Exception as e:
+            logger.warning("Could not announce hosted round in %s: %s", guild.id, e)
+
+    @tasks.loop(minutes=5)
+    async def registration_sweep(self):
+        """Cancel registrations nobody joined, so one empty round cannot wedge the arena.
+
+        An event left in REGISTERING stays in ACTIVE_STATUSES forever and
+        open_event() refuses to create another, so without this the first
+        hosted round that nobody joined would close the arena for good.
+        """
+        for guild in self.bot.guilds:
+            gid = str(guild.id)
+            try:
+                event = await self.arena.get_active_event(gid)
+                if not event or event.status != REGISTERING or not event.opened_at:
+                    continue
+                age = (utcnow() - event.opened_at).total_seconds() / 60.0
+                if age < REGISTRATION_TTL_MINUTES:
+                    continue
+                if await self.arena.registration_player_count(gid, event.event_id):
+                    continue
+                if not await self.arena.cancel_event(gid):
+                    continue
+            except Exception as e:
+                logger.warning("Registration sweep failed in %s: %s", gid, e)
+                continue
+            logger.info("Cancelled empty registration %s in %s", event.event_id, gid)
+            hub = await self._game_hub(guild)
+            if hub:
+                try:
+                    await hub.send(
+                        f"⌛ Registration for `{event.event_id}` closed - nobody stepped "
+                        "forward. The arena is open again."
+                    )
+                except Exception:
+                    pass
+
+    @registration_sweep.before_loop
+    async def before_registration_sweep(self):
+        await self.bot.wait_until_ready()
 
     @app_commands.command(name="open", description="Open a new games event for registration")
     @app_commands.describe(entry_fee="spi to enter (default 100)")

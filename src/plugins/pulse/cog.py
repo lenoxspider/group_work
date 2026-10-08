@@ -9,10 +9,8 @@ from discord.ext import commands, tasks
 
 from src.interface.channel_router import ChannelRouter
 from src.plugins.pulse.domain import (
-    AUDIENCE_WINDOW_MINUTES,
     PULSE_COOLDOWN_MINUTES,
     PULSE_PRIZE_SPI,
-    utcnow,
 )
 from src.plugins.pulse.modules import normalize
 from src.plugins.pulse.service import PulseService
@@ -32,7 +30,6 @@ class PulseCog(commands.Cog, name="Pulse"):
         self.bot = bot
         self.service = service
         self.channel_router = channel_router
-        self._last_activity: dict = {}
         self.pulse_loop.start()
 
     def cog_unload(self):
@@ -48,7 +45,7 @@ class PulseCog(commands.Cog, name="Pulse"):
         if message.author.bot or not message.guild:
             return
         gid = str(message.guild.id)
-        self._last_activity[gid] = utcnow()
+        self.bot.presence.note(gid)
 
         pulse = self.service.active_pulse(gid)
         if not pulse or pulse.mode != "message":
@@ -72,7 +69,7 @@ class PulseCog(commands.Cog, name="Pulse"):
             return
         # Reacting is presence too: a jury voting on a Snap Trial counts as an
         # audience just as much as someone typing.
-        self._last_activity[str(payload.guild_id)] = utcnow()
+        self.bot.presence.note(str(payload.guild_id))
         pulse = self.service.active_pulse(str(payload.guild_id))
         if not pulse or pulse.mode != "reaction":
             return
@@ -94,10 +91,7 @@ class PulseCog(commands.Cog, name="Pulse"):
 
     def _minutes_since_activity(self, guild_id: str) -> Optional[float]:
         """Minutes since anyone spoke or reacted, or None if we have never seen any."""
-        last = self._last_activity.get(guild_id)
-        if last is None:
-            return None
-        return (utcnow() - last).total_seconds() / 60.0
+        return self.bot.presence.minutes_since(guild_id)
 
     def _audience_present(self, guild_id: str) -> bool:
         """True when someone is demonstrably around to see a pulse land.
@@ -109,8 +103,7 @@ class PulseCog(commands.Cog, name="Pulse"):
         recorded yet. A pulse nobody claims trains people to ignore #pulse, so
         the bot now waits for proof of life instead.
         """
-        mins = self._minutes_since_activity(guild_id)
-        return mins is not None and mins <= AUDIENCE_WINDOW_MINUTES
+        return self.bot.presence.audience_present(guild_id)
 
     async def _should_fire(self, guild_id: str) -> bool:
         secs = await self.service.last_fired_seconds(guild_id)
@@ -179,20 +172,21 @@ class PulseCog(commands.Cog, name="Pulse"):
         # Surface the audience state: the pulse now refuses to fire into an
         # empty room, and that is invisible unless it says so.
         mins = self._minutes_since_activity(gid)
+        window = self.bot.presence.window_minutes
         if mins is None:
             audience = (
                 "⌛ No activity seen since the bot last started. The pulse waits for "
                 "someone to speak or react before it fires."
             )
-        elif mins <= AUDIENCE_WINDOW_MINUTES:
+        elif mins <= window:
             audience = (
                 f"👀 **Audience present** - last activity {int(mins)} min ago, inside the "
-                f"{AUDIENCE_WINDOW_MINUTES} min window. A pulse can fire."
+                f"{window} min window. A pulse can fire."
             )
         else:
             audience = (
                 f"💤 **No audience** - last activity {int(mins)} min ago, outside the "
-                f"{AUDIENCE_WINDOW_MINUTES} min window. The pulse is waiting rather than "
+                f"{window} min window. The pulse is waiting rather than "
                 "firing into an empty room."
             )
 

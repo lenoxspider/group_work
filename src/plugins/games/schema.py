@@ -11,7 +11,8 @@ GAMES_SCHEMA = [
         entry_fee INTEGER NOT NULL DEFAULT 0,
         winner_id TEXT,
         started_at TEXT,
-        concluded_at TEXT
+        concluded_at TEXT,
+        opened_at TEXT
     )
     """,
     """
@@ -46,4 +47,8 @@ GAMES_SCHEMA = [
         reason TEXT NOT NULL
     )
     """,
+]
+
+GAMES_MIGRATIONS = [
+    ("games_events", "opened_at", "TEXT"),
 ]

@@ -11,10 +11,17 @@ REGISTERING = "REGISTERING"
 ONGOING = "ONGOING"
 VOTING = "VOTING"
 CONCLUDED = "CONCLUDED"
+CANCELLED = "CANCELLED"
 
 ACTIVE_STATUSES = (REGISTERING, ONGOING, VOTING)
 
 DEFAULT_ENTRY_FEE = 100
+
+# Bot-hosted rounds. Entry is free because a fee would exclude exactly the
+# members the round is meant to pull in - several citizens hold zero spi.
+HOSTED_ENTRY_FEE = 0
+REGISTRATION_TTL_MINUTES = 30   # abandon an empty registration after this long
+HOST_COOLDOWN_MINUTES = 720     # never host more often than once per 12h
 
 DIGIT_WORDS = {
     "0": "zero", "1": "one", "2": "two", "3": "three", "4": "four",
@@ -38,6 +45,7 @@ class Event:
     winner_id: Optional[str] = None
     started_at: Optional[datetime] = None
     concluded_at: Optional[datetime] = None
+    opened_at: Optional[datetime] = None
 
     @property
     def formatted_pot(self) -> str:
@@ -50,6 +58,16 @@ class Event:
     def conclude(self, winner_id: Optional[str]) -> None:
         self.status = CONCLUDED
         self.winner_id = winner_id
+        self.concluded_at = utcnow()
+
+    def cancel(self) -> None:
+        """Abandon a registration that never filled.
+
+        Without this an event opened and left alone stays in ACTIVE_STATUSES
+        forever, and open_event() refuses to create another one - so a single
+        empty round would wedge the arena until an admin intervened.
+        """
+        self.status = CANCELLED
         self.concluded_at = utcnow()
 
 

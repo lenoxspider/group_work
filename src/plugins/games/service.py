@@ -128,7 +128,38 @@ class ArenaService:
             guild_id=guild_id,
             status=REGISTERING,
             entry_fee=fee,
+            opened_at=utcnow(),
         )
+        await self.repo.save_event(event)
+        return event
+
+    async def registration_player_count(self, guild_id: str, event_id: str) -> int:
+        return len(await self.repo.list_players(guild_id, event_id, alive_only=False))
+
+    async def seconds_since_last_event(self, guild_id: str) -> Optional[float]:
+        """How long since the arena last opened a round, in any status.
+
+        Read from the database rather than held in memory, so a restart cannot
+        reset the cooldown and host a second round minutes after the first.
+        """
+        event = await self.repo.get_last_event(guild_id)
+        if not event:
+            return None
+        ref = event.opened_at or event.started_at or event.concluded_at
+        if not ref:
+            return None
+        return (utcnow() - ref).total_seconds()
+
+    async def cancel_event(self, guild_id: str) -> Optional[Event]:
+        """Abandon a registration nobody joined, freeing the arena.
+
+        Only touches REGISTERING events - a game already underway belongs to
+        its players, not to the sweeper.
+        """
+        event = await self.repo.get_active_event(guild_id)
+        if not event or event.status != REGISTERING:
+            return None
+        event.cancel()
         await self.repo.save_event(event)
         return event
 
