@@ -39,6 +39,9 @@ class SocietyPlugin(Plugin):
         bank_plugin = registry.get("bank")
         if bank_plugin:
             self.service.attach_bank(bank_plugin.service)
+        chronicle = registry.get("chronicle")
+        if chronicle:
+            self.service.attach_chronicle(chronicle.service)
 
     def build_cogs(self, bot) -> list:
         return [SocietyCog(bot, self.service)]

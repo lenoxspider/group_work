@@ -93,9 +93,13 @@ class ArenaService:
             game.rng = self.rng
         self.game = self.games[0] if self.games else None
         self._audio_cache: dict = {}
+        self.chronicle = None
 
     def attach_bank(self, bank) -> None:
         self.bank = bank
+
+    def attach_chronicle(self, chronicle) -> None:
+        self.chronicle = chronicle
 
     @property
     def current_game_name(self) -> str:
@@ -345,6 +349,18 @@ class ArenaService:
 
         for game in self.games:
             game.end(guild_id)
+
+        if self.chronicle:
+            pot = event.pot_amount
+            if winner_id:
+                text = f"🎮 The Games concluded. <@{winner_id}> stood alone" + (f" and took the pot of {pot:,} spi." if pot else ".")
+            elif len(survivors) > 1:
+                text = f"🎮 The Games concluded. {len(survivors)} survived" + (f" and split {pot:,} spi." if pot else ".")
+            elif survivors:
+                text = "🎮 The Games concluded. One survivor" + (f" took {pot:,} spi." if pot else ".")
+            else:
+                text = "🎮 The Games concluded. Nobody survived" + (f"; the pot of {pot:,} spi carries onward." if pot else ".")
+            await self.chronicle.record(guild_id, "games_concluded", text)
 
         return ConcludeResult(
             guild_id=guild_id,

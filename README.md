@@ -172,6 +172,14 @@ The economy's only sink - wealth finally has somewhere to go.
 - Roles are created on demand and ordered priciest-highest, so the most expensive cosmetic a member owns wins their name colour. That needs headroom below the bot's top role; `/setup` warns when the guild has not left enough.
 - Delivery is deliver-then-charge: the role is granted first and rolled back if the burn fails, so spi is never taken without delivery. Gated behind citizenship.
 
+### 13. 📜 The Chronicle
+A country is a story its people share, so the state records its own history. Significant moments are written to `#chronicle` as they happen, in the bot's voice: a citizen signing, a court verdict, a Snap Trial, a law enacted or repealed, a proposal resolved, the Games concluding and who took the pot.
+
+- **Recording is fire-and-forget and cannot fail the action behind it** - a broken history write logs and moves on, it never breaks a signing or a verdict.
+- **Record and post are decoupled**: events append to the database, and a loop posts unposted entries to `#chronicle`. If the channel is missing or a send fails, the entry is retried rather than lost.
+- **`/chronicle recent [limit]`** reads the history back; **`/chronicle state`** gives a digest of everything recorded.
+- `#chronicle` is read-only for members - only the state writes there.
+
 ---
 
 ## 🚀 Getting Started

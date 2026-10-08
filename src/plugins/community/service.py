@@ -51,6 +51,7 @@ class CommunityService:
         self.bank = None
         self.task_service = None
         self.society = None
+        self.chronicle = None
 
     def attach_bank(self, bank) -> None:
         self.bank = bank
@@ -60,6 +61,9 @@ class CommunityService:
 
     def attach_society(self, society) -> None:
         self.society = society
+
+    def attach_chronicle(self, chronicle) -> None:
+        self.chronicle = chronicle
 
     # --- Membership ---
 
@@ -144,12 +148,21 @@ class CommunityService:
                 except Exception:
                     pass
             await self._pay_stipend(guild_id, user_id)
+            await self._chronicle_signed(guild_id, user_id)
             return member
         await self.repo.sign(guild_id, user_id, now)
         member.status = CITIZEN
         member.signed_at = now
         await self._pay_stipend(guild_id, user_id)
+        await self._chronicle_signed(guild_id, user_id)
         return member
+
+    async def _chronicle_signed(self, guild_id: str, user_id: str) -> None:
+        if self.chronicle:
+            await self.chronicle.record(
+                guild_id, "citizen_signed",
+                f"🗳️ <@{user_id}> signed the constitution and became a citizen of the collective.",
+            )
 
     async def _pay_stipend(self, guild_id: str, user_id: str) -> None:
         """A new citizen starts with enough spi to actually play, not just to be fined."""
@@ -297,6 +310,14 @@ class CommunityService:
             result["false_witness"] = True
         elif verdict == CASE_CONVICTED and case.round >= 2:
             result["sentence"] = await self.execute_sentence(guild_id, case_id)
+        if self.chronicle:
+            label = {
+                CASE_CONVICTED: "found GUILTY",
+                CASE_ACQUITTED: "acquitted",
+            }.get(verdict, "lapsed for want of a quorum")
+            await self.chronicle.record(
+                guild_id, "court_verdict", f"⚖️ {case.case_id}: <@{case.accused_id}> {label}."
+            )
         return result
 
     async def appeal_case(self, guild_id: str, case_id: str, user_id: str) -> Case:

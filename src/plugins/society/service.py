@@ -25,9 +25,13 @@ class SocietyService:
     def __init__(self, repo: SocietyRepository, bank=None):
         self.repo = repo
         self.bank = bank
+        self.chronicle = None
 
     def attach_bank(self, bank) -> None:
         self.bank = bank
+
+    def attach_chronicle(self, chronicle) -> None:
+        self.chronicle = chronicle
 
     # --- Laws ---
 
@@ -41,6 +45,11 @@ class SocietyService:
             created_at=utcnow(),
         )
         await self.repo.save_law(law)
+        if self.chronicle:
+            fine = f" (fine {law.fine_amount} spi)" if law.fine_amount else ""
+            await self.chronicle.record(
+                guild_id, "law_enacted", f"📜 {law.title} was enacted{fine}."
+            )
         return law
 
     async def list_laws(self, guild_id: str) -> List[Law]:
@@ -51,9 +60,14 @@ class SocietyService:
 
     async def remove_law(self, law_id: str) -> None:
         from src.plugins.society.domain import LawNotFound
-        if await self.repo.get_law(law_id) is None:
+        law = await self.repo.get_law(law_id)
+        if law is None:
             raise LawNotFound(f"No law with ID {law_id}")
         await self.repo.delete_law(law_id)
+        if self.chronicle:
+            await self.chronicle.record(
+                law.guild_id, "law_repealed", f"📜 {law.title} was repealed."
+            )
 
     # --- Proposals ---
 
@@ -143,6 +157,17 @@ class SocietyService:
         # Payout: approved spending proposals mint from the treasury to the author
         if status == APPROVED and proposal.amount > 0 and self.bank:
             await self.bank.grant(guild_id, proposal.author_id, proposal.amount, f"proposal {proposal_id} approved")
+
+        if self.chronicle:
+            verb = "passed" if status == APPROVED else "was rejected"
+            payout = (
+                f" — {proposal.amount:,} spi released"
+                if status == APPROVED and proposal.amount else ""
+            )
+            await self.chronicle.record(
+                guild_id, "proposal_concluded",
+                f"🏛️ Proposal `{proposal_id}` “{proposal.title}” {verb} ({yes}–{no}){payout}.",
+            )
 
         return updated
 

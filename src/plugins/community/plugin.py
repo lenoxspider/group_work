@@ -51,6 +51,9 @@ class CommunityPlugin(Plugin):
         society = registry.get("society")
         if society:
             self.service.attach_society(society.service)
+        chronicle = registry.get("chronicle")
+        if chronicle:
+            self.service.attach_chronicle(chronicle.service)
 
     def build_cogs(self, bot) -> list:
         return [CommunityCog(bot, self.service, channel_router=bot.channel_router)]

@@ -28,6 +28,7 @@ class PulseService:
         self.repo = repo
         self.bank = None
         self.community = None
+        self.chronicle = None
         self.active: dict = {}
 
     def attach_bank(self, bank) -> None:
@@ -35,6 +36,9 @@ class PulseService:
 
     def attach_community(self, community) -> None:
         self.community = community
+
+    def attach_chronicle(self, chronicle) -> None:
+        self.chronicle = chronicle
 
     def active_pulse(self, guild_id: str) -> Optional[ActivePulse]:
         return self.active.get(guild_id)
@@ -137,7 +141,10 @@ class PulseService:
     async def resolve_vote(self, pulse: ActivePulse, message: discord.Message) -> dict:
         counts = await self._tally(pulse, message)
         if pulse.kind == "snap_trial":
-            return await self._snap_verdict(pulse, counts)
+            result = await self._snap_verdict(pulse, counts)
+            if self.chronicle:
+                await self.chronicle.record(pulse.guild_id, "snap_trial", result["text"])
+            return result
         return {"text": f"⌛ **{pulse.label}** closed.", "verdict": "closed"}
 
     async def _tally(self, pulse: ActivePulse, message: discord.Message) -> dict:
