@@ -22,6 +22,9 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 
+from src.plugins.games.game import Game
+
+
 class NotYourTurn(Exception):
     """Raised when a player tries to move out of turn."""
 
@@ -49,17 +52,19 @@ class BridgeMove:
     players_left: int
 
 
-class GlassBridge:
+class GlassBridge(Game):
     """One bridge crossing for one guild at a time."""
 
     name = "Glass Bridge"
+    kind = "turn"
     description = (
         "Cross the glass bridge one at a time. Each row, pick left or right - "
         "one panel is tempered, one is false. A panel someone dies on is known "
         "to everyone behind them."
     )
 
-    def __init__(self, rng: Optional[random.Random] = None):
+    def __init__(self, arena=None, rng: Optional[random.Random] = None):
+        super().__init__(arena)
         self.rng = rng or random.Random()
         self._bridges: dict = {}
 
@@ -67,10 +72,11 @@ class GlassBridge:
     def sides() -> List[str]:
         return ["left", "right"]
 
-    def start(self, guild_id: str, players: List[str], rows: int = 8) -> None:
+    def start(self, guild_id: str, event_id: str, players: List[str], rows: Optional[int] = None) -> None:
         """players are in crossing order - the front of the queue moves first."""
         if not players:
             raise ValueError("A bridge needs at least one player.")
+        rows = rows or self.default_rows
         self._bridges[guild_id] = {
             "guild_id": guild_id,
             "order": list(players),
@@ -117,7 +123,7 @@ class GlassBridge:
             players_left=len(bridge["order"]),
         )
 
-    def handle_move(self, guild_id: str, user_id: str, side: str) -> BridgeMove:
+    def handle_choice(self, guild_id: str, user_id: str, side: str) -> BridgeMove:
         bridge = self._bridges.get(guild_id)
         if not bridge or bridge["done"]:
             raise NoActiveBridge("No bridge is running here.")
