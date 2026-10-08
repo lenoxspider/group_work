@@ -56,6 +56,7 @@ def _cog(arena) -> GamesCog:
     cog = object.__new__(GamesCog)
     cog.arena = arena
     cog.bot = SimpleNamespace(guilds=[])
+    cog._running_tasks = {}
     cog._begin_round = AsyncMock()
     cog._game_hub = AsyncMock(return_value=None)
     return cog
@@ -123,6 +124,72 @@ class TestRegistrationSweep(unittest.IsolatedAsyncioTestCase):
         arena.cancel_event = AsyncMock(side_effect=RuntimeError("database is locked"))
         cog = _cog(arena)
         cog.bot = SimpleNamespace(guilds=[SimpleNamespace(id="g1"), SimpleNamespace(id="g2")])
+        await cog.registration_sweep()  # must not raise out of the loop
+
+
+class FakeConcludeResult:
+    def __init__(self, survivor_count=2):
+        self.survivor_count = survivor_count
+        self.winner_id = None
+
+
+class ConcludingArena(FakeArena):
+    def __init__(self, event, players=0):
+        super().__init__(event, players)
+        self.conclude_calls = 0
+
+    async def conclude_event(self, guild_id):
+        self.conclude_calls += 1
+        if self.event:
+            self.event.conclude(None)
+        return FakeConcludeResult()
+
+
+def _task(done: bool):
+    return SimpleNamespace(done=lambda: done)
+
+
+class TestAbandonedGameSweep(unittest.IsolatedAsyncioTestCase):
+    """ONGOING is in ACTIVE_STATUSES too, so a dead runner wedges the arena."""
+
+    async def test_ongoing_with_no_runner_is_concluded(self):
+        arena = ConcludingArena(_event(status=ONGOING, opened_minutes_ago=90), players=3)
+        cog = _cog(arena)
+        await cog._resolve_abandoned_game(_guild())
+        self.assertEqual(arena.conclude_calls, 1)
+
+    async def test_ongoing_with_a_live_runner_is_left_alone(self):
+        arena = ConcludingArena(_event(status=ONGOING, opened_minutes_ago=2), players=3)
+        cog = _cog(arena)
+        cog._running_tasks[GUILD_ID] = _task(done=False)
+        await cog._resolve_abandoned_game(_guild())
+        self.assertEqual(arena.conclude_calls, 0)
+
+    async def test_ongoing_with_a_finished_runner_is_concluded(self):
+        """The runner raised before reaching conclude_event()."""
+        arena = ConcludingArena(_event(status=ONGOING, opened_minutes_ago=40), players=3)
+        cog = _cog(arena)
+        cog._running_tasks[GUILD_ID] = _task(done=True)
+        await cog._resolve_abandoned_game(_guild())
+        self.assertEqual(arena.conclude_calls, 1)
+
+    async def test_registration_is_not_concluded_as_abandoned(self):
+        arena = ConcludingArena(_event(opened_minutes_ago=90), players=2)
+        cog = _cog(arena)
+        await cog._resolve_abandoned_game(_guild())
+        self.assertEqual(arena.conclude_calls, 0)
+
+    async def test_no_event_is_a_noop(self):
+        arena = ConcludingArena(None)
+        cog = _cog(arena)
+        await cog._resolve_abandoned_game(_guild())
+        self.assertEqual(arena.conclude_calls, 0)
+
+    async def test_sweep_survives_a_conclude_failure(self):
+        arena = ConcludingArena(_event(status=ONGOING, opened_minutes_ago=90), players=1)
+        arena.conclude_event = AsyncMock(side_effect=RuntimeError("database is locked"))
+        cog = _cog(arena)
+        cog.bot = SimpleNamespace(guilds=[SimpleNamespace(id="g1")])
         await cog.registration_sweep()  # must not raise out of the loop
 
 

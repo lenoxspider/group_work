@@ -15,6 +15,7 @@ from src.plugins.games.domain import (
     AUTO_START_AFTER_MINUTES,
     HOSTED_ENTRY_FEE,
     HOST_COOLDOWN_MINUTES,
+    ONGOING,
     REGISTERING,
     REGISTRATION_TTL_MINUTES,
     utcnow,
@@ -166,6 +167,41 @@ class GamesCog(commands.GroupCog, group_name="event"):
                 await self._resolve_registration(guild)
             except Exception as e:
                 logger.warning("Registration sweep failed in %s: %s", guild.id, e)
+            try:
+                await self._resolve_abandoned_game(guild)
+            except Exception as e:
+                logger.warning("Abandoned-game sweep failed in %s: %s", guild.id, e)
+
+    async def _resolve_abandoned_game(self, guild: discord.Guild) -> None:
+        """Conclude an ONGOING event whose runner is gone.
+
+        conclude_event() sits inside the runner's try block, so anything raising
+        before it - a failed channel.send, an audio error - leaves the event
+        ONGOING. That is in ACTIVE_STATUSES too, so open_event() refuses forever
+        and the arena is wedged exactly as it was by a stuck registration. A bot
+        restart mid-game lands in the same state, because _running_tasks is
+        in-memory and a round cannot be resumed.
+        """
+        gid = str(guild.id)
+        event = await self.arena.get_active_event(gid)
+        if not event or event.status != ONGOING:
+            return
+        task = self._running_tasks.get(gid)
+        if task and not task.done():
+            return  # a live runner owns this event; leave it alone
+        result = await self.arena.conclude_event(gid)
+        logger.warning(
+            "Concluded abandoned game %s in %s (no live runner)", event.event_id, gid
+        )
+        hub = await self._game_hub(guild)
+        if hub:
+            try:
+                await hub.send(
+                    f"⚠️ Round `{event.event_id}` was abandoned mid-game, so the Front Man "
+                    f"has concluded it. Survivors: **{result.survivor_count}**."
+                )
+            except Exception:
+                pass
 
     async def _resolve_registration(self, guild: discord.Guild) -> None:
         gid = str(guild.id)
