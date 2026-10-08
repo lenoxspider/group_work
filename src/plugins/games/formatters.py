@@ -155,3 +155,63 @@ def build_ephemeral_move_feedback(res: Any) -> str:
     line2 = f"`{bar}`"
     line3 = f"{_ordinal(res.rank)} of {res.total_racers} still running · +{remaining}m to finish"
     return f"{line1}\n{line2}\n{line3}"
+
+
+def build_bridge_embed(board: dict) -> discord.Embed:
+    """Render the glass bridge: rows near to far, revealed panels, whose turn it is."""
+    rows = board["rows"]
+    known = board["known"]
+    current_row = board["current_row"]
+    current = board["current_player"]
+
+    grid = ["```", "🏁 FAR SIDE"]
+    for r in range(rows - 1, -1, -1):
+        panel = known[r]
+        if panel == "left":
+            cells = "✅ ┃ 💥"
+        elif panel == "right":
+            cells = "💥 ┃ ✅"
+        else:
+            cells = "❓ ┃ ❓"
+        marker = "  ◀ here" if (current and r == current_row) else ""
+        grid.append(f"{r:>2}  {cells}{marker}")
+    grid.append("🚪 NEAR SIDE")
+    grid.append("```")
+
+    head = (
+        f"<@{current}> is at row **{current_row}**. Choose **Left** or **Right**."
+        if current else "The crossing is complete."
+    )
+    embed = discord.Embed(
+        title="○ △ □ GLASS BRIDGE",
+        description="\n".join(grid) + "\n" + head,
+        color=SQUID_PINK,
+    )
+    queue = board.get("queue", [])
+    if len(queue) > 1:
+        embed.add_field(
+            name="Waiting", value=", ".join(f"<@{u}>" for u in queue[1:]), inline=False
+        )
+    if board.get("fell"):
+        embed.add_field(
+            name="Fallen", value=", ".join(f"<@{u}>" for u in board["fell"]), inline=True
+        )
+    if board.get("crossed"):
+        embed.add_field(
+            name="Crossed", value=", ".join(f"<@{u}>" for u in board["crossed"]), inline=True
+        )
+    embed.set_footer(text="A panel someone dies on is known to everyone behind them.")
+    return embed
+
+
+def build_bridge_feedback(move) -> str:
+    """Ephemeral line shown to the player who just chose."""
+    if move.outcome == "safe":
+        return f"✅ Tempered glass. You step forward to row {move.row + 1}. Keep going."
+    if move.outcome == "crossed":
+        return "🏁 **You crossed the bridge.** Step off and watch the rest."
+    if move.outcome == "fell":
+        return "💥 The panel shatters. You fall. The next player now knows which side was safe."
+    if move.outcome == "stalled":
+        return "⌛ You did not choose in time. The glass gives way beneath you."
+    return "Move recorded."

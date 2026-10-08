@@ -17,13 +17,13 @@ class GamesPlugin(Plugin):
     name = "games"
     title = "🎮 Games Arena"
     summary = (
-        "Squid Game events. The bot hosts free-entry rounds when an audience is "
-        "present; survive Red Light Green Light and split the pot."
+        "Squid Game events. The bot hosts free-entry Glass Bridge rounds when an "
+        "audience is present; Red Light Green Light is also playable. Survive and split the pot."
     )
     guide = [
-        ("/event open [entry_fee]", "Open a new event. Entry fee defaults to 100 spi"),
+        ("/event open [entry_fee] [game]", "Open an event. game = redlight (default) or bridge; entry fee defaults to 100 spi"),
         ("/event join", "Pay the entry fee and claim a player number (001-456)"),
-        ("/event start", "Lock registration and begin Round 1 (Red Light Green Light)"),
+        ("/event start", "Lock registration and begin the round"),
         ("/event status", "Arena pot, survivor count, and current game"),
         ("/event vote <continue|stop>", "Surviving players vote between rounds"),
         ("/event conclude", "Resolve the event and pay out the pot"),

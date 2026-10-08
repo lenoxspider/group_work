@@ -27,6 +27,8 @@ from src.plugins.games.formatters import (
     build_status_embed,
 )
 from src.plugins.games.move_view import MoveView
+from src.plugins.games.bridge_runner import GlassBridgeRunner
+from src.plugins.games.bridge_view import BridgeView
 from src.plugins.games.runner import RedLightRunner
 from src.plugins.games.service import ArenaService
 from src.plugins.community.checks import requires_citizen
@@ -51,11 +53,13 @@ class GamesCog(commands.GroupCog, group_name="event"):
         self.synthesizer = synthesizer
         self.channel_router = channel_router
         self.runner = RedLightRunner(bot, arena, audio_deliverer, synthesizer, channel_router=channel_router)
+        self.bridge_runner = GlassBridgeRunner(bot, arena, channel_router=channel_router)
         self._running_tasks: dict = {}
         super().__init__()
 
     async def cog_load(self):
         self.bot.add_view(MoveView(self.arena, self.channel_router))
+        self.bot.add_view(BridgeView(self.arena, self.channel_router))
         self.arena.reset_all_games()
         self.host_loop.start()
         self.registration_sweep.start()
@@ -116,7 +120,7 @@ class GamesCog(commands.GroupCog, group_name="event"):
                 since = await self.arena.seconds_since_last_event(gid)
                 if since is not None and since < HOST_COOLDOWN_MINUTES * 60:
                     continue
-                event = await self.arena.open_event(gid, HOSTED_ENTRY_FEE)
+                event = await self.arena.open_event(gid, HOSTED_ENTRY_FEE, game_index=1)
             except Exception as e:
                 logger.warning("Could not host an arena round in %s: %s", gid, e)
                 continue
@@ -137,7 +141,9 @@ class GamesCog(commands.GroupCog, group_name="event"):
                 "Run `/event join` to claim a player number. You do not have to start it "
                 f"yourselves - the round begins on its own {AUTO_START_AFTER_MINUTES} minutes "
                 "after opening if anyone has stepped forward.\n\n"
-                "Red Light Green Light. Move on green, freeze on red.\n"
+                "**Glass Bridge.** Cross one at a time; on your turn choose Left or Right. "
+                "One panel is tempered, one is false, and a panel someone dies on is known "
+                "to everyone behind them.\n"
                 f"If nobody joins, registration is abandoned after {REGISTRATION_TTL_MINUTES} minutes."
             ),
             color=discord.Color.from_rgb(255, 0, 144),
@@ -238,18 +244,24 @@ class GamesCog(commands.GroupCog, group_name="event"):
         await self.bot.wait_until_ready()
 
     @app_commands.command(name="open", description="Open a new games event for registration")
-    @app_commands.describe(entry_fee="spi to enter (default 100)")
-    async def open(self, interaction: discord.Interaction, entry_fee: Optional[int] = None):
+    @app_commands.describe(entry_fee="spi to enter (default 100)", game="which game to play (default Red Light Green Light)")
+    @app_commands.choices(game=[
+        app_commands.Choice(name="Red Light Green Light", value="redlight"),
+        app_commands.Choice(name="Glass Bridge", value="bridge"),
+    ])
+    async def open(self, interaction: discord.Interaction, entry_fee: Optional[int] = None, game: Optional[str] = None):
         try:
             await interaction.response.defer()
         except discord.NotFound:
             return
 
         guild_id = str(interaction.guild_id)
+        index = 1 if game == "bridge" else 0
         try:
-            event = await self.arena.open_event(guild_id, entry_fee)
+            event = await self.arena.open_event(guild_id, entry_fee, game_index=index)
+            label = "Glass Bridge" if index else "Red Light Green Light"
             await interaction.followup.send(
-                f"**REGISTRATION OPEN.** Entry fee: **{event.entry_fee} spi**. "
+                f"**REGISTRATION OPEN — {label}.** Entry fee: **{event.entry_fee} spi**. "
                 f"Use `/event join` to claim a player number, then `/event start` to begin."
             )
         except AppError as e:
@@ -283,32 +295,43 @@ class GamesCog(commands.GroupCog, group_name="event"):
             await interaction.followup.send(f"{e.message}", ephemeral=True)
 
     async def _begin_round(self, guild: discord.Guild) -> None:
-        """Lock registration and launch Round 1.
+        """Lock registration and launch the round.
 
         Shared by `/event start` and the registration sweep, so a round the bot
-        starts on its own behaves exactly like one a human starts.
+        starts on its own behaves exactly like one a human starts. Picks the
+        runner by the event's selected game.
         """
         guild_id = str(guild.id)
         running = self._running_tasks.get(guild_id)
         if running and not running.done():
             raise ValidationError("A game is already in progress.")
 
-        await self.arena.start_event(guild_id)
+        event = await self.arena.start_event(guild_id)
 
         hub = await self._game_hub(guild)
         if not hub:
             raise ValidationError("No #game-hub channel to run the round in.")
 
+        game = self.arena.games[event.current_game_index] if self.arena.games else None
+        is_turn = getattr(game, "kind", "timed") == "turn"
+        runner = self.bridge_runner if is_turn else self.runner
+
         try:
-            await hub.send(
-                "**Round 1: Red Light Green Light.** The doll is watching. "
-                "Use `/move` or the MOVE button."
-            )
+            if is_turn:
+                await hub.send(
+                    "**Round: Glass Bridge.** Cross one at a time; on your turn choose "
+                    "**Left** or **Right**. A panel someone dies on is known to everyone behind them."
+                )
+            else:
+                await hub.send(
+                    "**Round 1: Red Light Green Light.** The doll is watching. "
+                    "Use `/move` or the MOVE button."
+                )
         except Exception as e:
             logger.warning("Could not announce round start in %s: %s", guild_id, e)
 
         task = self.bot.loop.create_task(
-            self.runner.run(hub, guild_id, on_cleanup=lambda gid: self._running_tasks.pop(gid, None))
+            runner.run(hub, guild_id, on_cleanup=lambda gid: self._running_tasks.pop(gid, None))
         )
         self._running_tasks[guild_id] = task
 

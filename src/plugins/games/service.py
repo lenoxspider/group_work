@@ -28,7 +28,13 @@ from src.plugins.games.domain import (
     utcnow,
 )
 from src.plugins.games.game import Game, get_games
-from src.plugins.games.glass_bridge import NoActiveBridge, NotYourTurn
+from src.plugins.games.glass_bridge import (
+    CROSSED,
+    FELL,
+    NoActiveBridge,
+    NotYourTurn,
+    STALLED,
+)
 from src.plugins.games.repository import SQLiteGamesRepository
 
 
@@ -419,16 +425,42 @@ class ArenaService:
         if not game:
             raise ValidationError("No game is running.")
         try:
-            return game.handle_choice(guild_id, user_id, side)
+            move = game.handle_choice(guild_id, user_id, side)
         except (NotYourTurn, NoActiveBridge, ValueError) as e:
             raise ValidationError(str(e))
+        await self._apply_bridge_outcome(guild_id, move)
+        return move
 
     async def handle_stall(self, guild_id: str):
         """The current player never chose within the turn window."""
         game = await self.current_game(guild_id)
         if not game:
             return None
-        return game.handle_stall(guild_id)
+        move = game.handle_stall(guild_id)
+        if move:
+            await self._apply_bridge_outcome(guild_id, move)
+        return move
+
+    async def _apply_bridge_outcome(self, guild_id: str, move) -> None:
+        """Mirror a bridge outcome onto the arena roster, which owns survival and payout.
+
+        The bridge module is pure - it tracks who fell and who crossed but never
+        touches Player.is_alive. conclude_event pays survivors by is_alive, so a
+        fall has to be recorded here or the dead would still split the pot.
+        """
+        if move.outcome in (FELL, STALLED):
+            reason = (
+                "Fell through the glass bridge" if move.outcome == FELL
+                else "Failed to choose in time"
+            )
+            await self.eliminate_player(guild_id, move.user_id, reason, synthesize_audio=False)
+        elif move.outcome == CROSSED:
+            event = await self.repo.get_active_event(guild_id)
+            if event:
+                player = await self.repo.get_player(guild_id, event.event_id, move.user_id)
+                if player and player.is_alive:
+                    player.advance_survival()
+                    await self.repo.save_player(player)
 
     async def clear_session(self, guild_id: str) -> None:
         for game in self.games:

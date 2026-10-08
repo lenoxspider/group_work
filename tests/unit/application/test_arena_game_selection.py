@@ -115,6 +115,53 @@ class TestArenaGameSelection(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.arena.games[REDLIGHT].is_active(GUILD))
         self.assertFalse(self.arena.games[BRIDGE].is_active(GUILD))
 
+    # --- bridge outcomes mirrored onto the arena roster ---
+
+    async def _player(self, user_id):
+        event = await self.arena.get_active_event(GUILD)
+        return await self.repo.get_player(GUILD, event.event_id, user_id)
+
+    async def test_a_fall_marks_the_player_dead_in_the_arena(self):
+        """If this were missed, conclude_event would pay someone who fell."""
+        await self.arena.open_event(GUILD, entry_fee=0, game_index=BRIDGE)
+        await self._join(None, "u1", "u2")
+        await self.arena.start_event(GUILD)
+        safe = self.arena.games[BRIDGE].get_state(GUILD)["safe"][0]
+        wrong = "left" if safe == "right" else "right"
+        move = await self.arena.handle_choice(GUILD, "u1", wrong)
+        self.assertEqual(move.outcome, "fell")
+        self.assertFalse((await self._player("u1")).is_alive)
+
+    async def test_crossing_keeps_the_player_alive_and_counts_survival(self):
+        await self.arena.open_event(GUILD, entry_fee=0, game_index=BRIDGE)
+        await self._join(None, "u1", "u2")
+        await self.arena.start_event(GUILD)
+        state = self.arena.games[BRIDGE].get_state(GUILD)
+        state["current_row"] = state["rows"] - 1   # put u1 on the final row
+        move = await self.arena.handle_choice(GUILD, "u1", state["safe"][state["current_row"]])
+        self.assertEqual(move.outcome, "crossed")
+        player = await self._player("u1")
+        self.assertTrue(player.is_alive)
+        self.assertEqual(player.survival_streak, 1)
+
+    async def test_a_stall_marks_the_player_dead(self):
+        await self.arena.open_event(GUILD, entry_fee=0, game_index=BRIDGE)
+        await self._join(None, "u1", "u2")
+        await self.arena.start_event(GUILD)
+        move = await self.arena.handle_stall(GUILD)
+        self.assertEqual(move.outcome, "stalled")
+        self.assertFalse((await self._player("u1")).is_alive)
+
+    async def test_a_crosser_survives_conclusion_and_a_faller_does_not(self):
+        await self.arena.open_event(GUILD, entry_fee=0, game_index=BRIDGE)
+        await self._join(None, "u1", "u2")
+        await self.arena.start_event(GUILD)
+        safe = self.arena.games[BRIDGE].get_state(GUILD)["safe"][0]
+        wrong = "left" if safe == "right" else "right"
+        await self.arena.handle_choice(GUILD, "u1", wrong)   # u1 falls
+        result = await self.arena.conclude_event(GUILD)
+        self.assertEqual(result.winner_id, "u2", "the survivor takes it, not the faller")
+
 
 if __name__ == "__main__":
     unittest.main()
