@@ -12,6 +12,7 @@ on 3.14 too. That is the point: a test suite that is only strict on the
 interpreter production uses is not much of a guard.
 """
 
+import __future__
 import importlib
 import inspect
 import os
@@ -66,9 +67,18 @@ def _resolve(target) -> None:
 
 class TestAnnotationsResolve(unittest.TestCase):
     def test_canary_proves_the_check_works(self):
-        """Trust the sweep over ~1400 objects only after seeing it fail."""
+        """Trust the sweep over ~1400 objects only after seeing it fail.
+
+        Compiled with the postponed-annotation flag so the canary behaves the
+        same on every interpreter. Without it, Python 3.12 evaluates the
+        annotation while the def is being executed and raises NameError before
+        get_type_hints is ever reached - so the canary errored on exactly the
+        version whose strictness this whole test exists to reproduce.
+        """
         namespace = {}
-        exec("def broken(x: NeverImported) -> None: ...", namespace)
+        source = "def broken(x: NeverImported) -> None: ..."
+        code = compile(source, "<canary>", "exec", flags=__future__.annotations.compiler_flag)
+        exec(code, namespace)
         with self.assertRaises(NameError):
             _resolve(namespace["broken"])
 
