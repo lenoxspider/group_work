@@ -118,6 +118,20 @@ class GroupAccountabilityBot(commands.Bot):
                     pass
                 return
             logger.error("Unhandled slash command error: %s", error, exc_info=orig_error)
+            # Tell the user something failed. Without this, a command that
+            # deferred and then raised leaves the interaction spinning until
+            # Discord's token expires - which reads as the bot hanging.
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(
+                        "Something went wrong running that command.", ephemeral=True
+                    )
+                else:
+                    await interaction.response.send_message(
+                        "Something went wrong running that command.", ephemeral=True
+                    )
+            except Exception:
+                pass
 
         # Sync Slash Commands
         try:

@@ -579,11 +579,15 @@ class CommunityCog(commands.Cog, name="Community"):
 
         png = await self._render_passport(interaction, member, balance, citizen_no)
         if png:
-            await interaction.followup.send(
-                content=f"🛂 Passport of **{interaction.user.display_name}** · citizen no. `{citizen_no}`",
-                file=discord.File(io.BytesIO(png), filename="passport.png"),
-                view=view,
-            )
+            # discord.py rejects an explicitly-passed view=None, so only include
+            # it when there is an actual button to show (catizens signing).
+            payload = {
+                "content": f"🛂 Passport of **{interaction.user.display_name}** · citizen no. `{citizen_no}`",
+                "file": discord.File(io.BytesIO(png), filename="passport.png"),
+            }
+            if view is not None:
+                payload["view"] = view
+            await interaction.followup.send(**payload)
             return
 
         # Text fallback if the image could not be rendered (e.g. Pillow missing).
@@ -600,7 +604,10 @@ class CommunityCog(commands.Cog, name="Community"):
         embed.add_field(name="Wallet", value=f"`{balance:,} spi`", inline=True)
         if member.status == CATIZEN:
             embed.set_footer(text="Sign below (or run /join) to become a citizen.")
-        await interaction.followup.send(embed=embed, view=view)
+        if view is not None:
+            await interaction.followup.send(embed=embed, view=view)
+        else:
+            await interaction.followup.send(embed=embed)
 
     async def _render_passport(self, interaction, member, balance: int, citizen_no: str):
         """Render the passport PNG, or None if anything along the way fails.
