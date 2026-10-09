@@ -1,5 +1,7 @@
 """Community Cog - onboarding, the constitution, and the tribunal."""
 
+import asyncio
+import io
 import logging
 from datetime import datetime, timezone
 from typing import Literal, Optional
@@ -557,7 +559,8 @@ class CommunityCog(commands.Cog, name="Community"):
             return str(self.bot.guilds[0].id)
         return None
 
-    @app_commands.command(name="me", description="Your membership status, intro task, and wallet")
+    @app_commands.command(name="me", description="Your passport - membership, wallet, and standing in the collective")
+    @app_commands.checks.cooldown(1, 15.0, key=lambda i: i.user.id)
     async def me(self, interaction: discord.Interaction):
         await interaction.response.defer()
         guild_id = str(interaction.guild_id)
@@ -571,6 +574,19 @@ class CommunityCog(commands.Cog, name="Community"):
             except Exception:
                 pass
 
+        citizen_no = f"{int(user_id) % 1000000:06d}"
+        view = SignConstitutionView(self) if member.status == CATIZEN else None
+
+        png = await self._render_passport(interaction, member, balance, citizen_no)
+        if png:
+            await interaction.followup.send(
+                content=f"🛂 Passport of **{interaction.user.display_name}** · citizen no. `{citizen_no}`",
+                file=discord.File(io.BytesIO(png), filename="passport.png"),
+                view=view,
+            )
+            return
+
+        # Text fallback if the image could not be rendered (e.g. Pillow missing).
         status_display = "🐱 Catizen" if member.status == CATIZEN else "🗳️ Citizen"
         if member.intro_done:
             intro = "✅ done"
@@ -578,16 +594,42 @@ class CommunityCog(commands.Cog, name="Community"):
             intro = "⏳ pending (/intro)"
         else:
             intro = "—"
-
         embed = discord.Embed(title=f"Identity of {interaction.user.display_name}", color=PINK)
         embed.add_field(name="Membership", value=f"**{status_display}**", inline=True)
         embed.add_field(name="Intro task", value=intro, inline=True)
         embed.add_field(name="Wallet", value=f"`{balance:,} spi`", inline=True)
-        view = None
         if member.status == CATIZEN:
             embed.set_footer(text="Sign below (or run /join) to become a citizen.")
-            view = SignConstitutionView(self)
         await interaction.followup.send(embed=embed, view=view)
+
+    async def _render_passport(self, interaction, member, balance: int, citizen_no: str):
+        """Render the passport PNG, or None if anything along the way fails.
+
+        Never raises: a missing Pillow, an unreachable avatar, or a render error
+        all fall back to the text card rather than breaking /me.
+        """
+        try:
+            from src.plugins.community.passport import PassportData, render_passport
+        except Exception as e:
+            logger.warning("Passport renderer unavailable: %s", e)
+            return None
+        try:
+            avatar = await interaction.user.display_avatar.with_size(256).read()
+        except Exception:
+            avatar = None
+        data = PassportData(
+            display_name=interaction.user.display_name,
+            citizen_no=citizen_no,
+            status="catizen" if member.status == CATIZEN else "citizen",
+            balance=balance,
+            signed_at=member.signed_at,
+            avatar_bytes=avatar,
+        )
+        try:
+            return await asyncio.to_thread(render_passport, data)
+        except Exception as e:
+            logger.warning("Passport render failed for %s: %s", citizen_no, e)
+            return None
 
     @citizens.command(name="setup", description="[Admin] Enroll existing members into the community system")
     @app_commands.describe(mode="grandfather = full citizens now; recruit = they must sign + post an intro")
