@@ -112,3 +112,21 @@ class ChronicleCog(commands.Cog, name="Chronicle"):
             embed.add_field(name="Latest entry", value=recent[-1]["text"][:1000], inline=False)
         embed.set_footer(text="Recorded by the state, in its own hand.")
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @chronicle.command(name="reconstruct", description="[Admin] Backfill the chronicle from the server's existing history")
+    @app_commands.checks.has_permissions(manage_channels=True)
+    async def chronicle_reconstruct(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        count = await self.service.reconstruct_history(str(interaction.guild_id))
+        if count == 0:
+            await interaction.followup.send(
+                "The chronicle already has entries, or there was nothing to reconstruct. "
+                "It only runs on an empty chronicle, so it can never duplicate history.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.followup.send(
+                f"📜 Reconstructed **{count}** entries from the ledger. They will appear "
+                "in #chronicle shortly, oldest first.",
+                ephemeral=True,
+            )

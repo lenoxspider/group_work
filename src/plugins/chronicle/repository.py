@@ -20,6 +20,14 @@ class SQLiteChronicleRepository:
             )
             await db.commit()
 
+    async def count_entries(self, guild_id: str) -> int:
+        async with connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM chronicle_entries WHERE guild_id = ?", (guild_id,)
+            ) as cur:
+                row = await cur.fetchone()
+                return row[0] if row else 0
+
     async def list_unposted(self, limit: int = 25) -> List[dict]:
         async with connect(self.db_path) as db:
             async with db.execute(

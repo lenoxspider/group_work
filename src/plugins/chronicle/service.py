@@ -34,3 +34,23 @@ class ChronicleService:
 
     async def counts(self, guild_id: str) -> Dict[str, int]:
         return await self.repo.count_by_kind(str(guild_id))
+
+    async def reconstruct_history(self, guild_id: str) -> int:
+        """Backfill the chronicle from the ledger the server already keeps.
+
+        Idempotent: if the guild already has entries it does nothing, so running
+        it twice cannot duplicate history. Returns the number of entries added.
+        """
+        gid = str(guild_id)
+        if await self.repo.count_entries(gid):
+            return 0
+        from src.plugins.chronicle.history import reconstruct
+        try:
+            rows = await reconstruct(self.repo.db_path, gid)
+        except Exception as e:
+            logger.warning("Chronicle reconstruction failed: %s", e)
+            return 0
+        for kind, text, created_at in rows:
+            await self.repo.add(gid, kind, text, created_at)
+        logger.info("Reconstructed %s chronicle entries for %s", len(rows), gid)
+        return len(rows)
