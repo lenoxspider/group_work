@@ -6,7 +6,7 @@ from typing import Optional
 
 import discord
 
-from src.plugins.bank.domain import TREASURY
+from src.plugins.bank.domain import InsufficientFunds, TREASURY
 from src.plugins.pulse.domain import (
     PULSE_PRIZE_SPI,
     PULSE_TIMEOUT_SECONDS,
@@ -93,7 +93,9 @@ class PulseService:
             try:
                 await msg.add_reaction(reaction)
             except Exception:
-                pass
+                # Not cosmetic: without its reactions an Odd One Out cannot be
+                # clicked and a Snap Trial has no verdicts to cast.
+                logger.warning("Could not add reaction %s to pulse %s", reaction, spec["kind"])
 
         pulse = ActivePulse(
             guild_id=guild_id,
@@ -134,6 +136,9 @@ class PulseService:
         try:
             return (utcnow() - datetime.fromisoformat(raw)).total_seconds()
         except Exception:
+            # Returning None reads as "never fired", which would let the pulse
+            # ignore its cooldown - so a corrupt row must not pass silently.
+            logger.warning("Unreadable pulse timestamp for %s: %r", guild_id, raw)
             return None
 
     # --- Vote mode (Snap Trial) ---
@@ -199,12 +204,24 @@ class PulseService:
                             f"to the treasury for *{crime}*."
                         ),
                     }
-                except Exception:
+                except InsufficientFunds:
                     return {
                         "verdict": "guilty_broke",
                         "text": (
                             f"⚖️ **GUILTY** {tally} — but <@{accused_id}> is broke and cannot pay "
                             f"the **{SNAP_FINE_SPI} spi** fine for *{crime}*. Shame on the ledger."
+                        ),
+                    }
+                except Exception as e:
+                    # A technical failure is not the same as being broke, and
+                    # calling a member broke when the ledger simply failed would
+                    # be a false public statement about them.
+                    logger.error("Snap Trial fine could not be collected from %s: %s", accused_id, e)
+                    return {
+                        "verdict": "guilty_unpaid",
+                        "text": (
+                            f"⚖️ **GUILTY** {tally} — <@{accused_id}> owes **{SNAP_FINE_SPI} spi** "
+                            f"for *{crime}*, but the fine could not be collected."
                         ),
                     }
             return {
@@ -225,8 +242,10 @@ class PulseService:
                         f"pays **{SNAP_COMPENSATION_SPI} spi** for the trouble."
                     ),
                 }
-            except Exception:
-                pass
+            except Exception as e:
+                # The acquittal still stands, but a promised payment that never
+                # arrived should not vanish without a trace.
+                logger.error("Snap Trial compensation failed for %s: %s", accused_id, e)
         return {
             "verdict": "innocent",
             "text": f"⚖️ **INNOCENT** {tally} — <@{accused_id}> walks free for *{crime}*.",

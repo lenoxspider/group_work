@@ -82,9 +82,10 @@ class FakeGuild:
 
 
 class FakeMember:
-    def __init__(self, user_id, fail_add=False):
+    def __init__(self, user_id, fail_add=False, fail_remove=False):
         self.id = int(user_id)
         self.fail_add = fail_add
+        self.fail_remove = fail_remove
         self.added = []
         self.removed = []
 
@@ -94,6 +95,8 @@ class FakeMember:
         self.added.append(role.name)
 
     async def remove_roles(self, role, reason=None):
+        if self.fail_remove:
+            raise discord.Forbidden(FakeResponse(), "role hierarchy")
         self.removed.append(role.name)
 
 
@@ -250,6 +253,16 @@ class TestShopService(unittest.IsolatedAsyncioTestCase):
             await service.buy(guild, member, "vip")
         self.assertEqual(member.removed, [BY_ID["vip"].name], "role not rolled back")
         self.assertFalse(await self.repo.owns(str(GUILD_ID), "333", "vip"))
+
+    async def test_a_failed_rollback_does_not_claim_the_purchase_was_cancelled(self):
+        """They kept the role and were not charged - 'cancelled' would be a lie."""
+        service = self._service(balance=5000, fail_burn=True)
+        guild, member = FakeGuild(), FakeMember("444", fail_remove=True)
+        with self.assertRaises(ShopError) as ctx:
+            await service.buy(guild, member, "vip")
+        self.assertIn("by hand", str(ctx.exception))
+        self.assertNotIn("Purchase cancelled", str(ctx.exception))
+        self.assertFalse(await self.repo.owns(str(GUILD_ID), "444", "vip"))
 
     # --- role creation and ordering ---
 

@@ -78,11 +78,23 @@ class ShopService:
         try:
             await self.bank.burn(guild_id, user_id, item.price, f"shop: {item.name}")
         except Exception as e:
+            rolled_back = True
             try:
                 await member.remove_roles(role, reason="Purchase rolled back")
-            except Exception:
-                pass
-            raise ShopError(f"Could not take the spi ({e}). Purchase cancelled.")
+            except Exception as rollback_error:
+                rolled_back = False
+                logger.error(
+                    "Burn failed for %s and the %s role could not be removed either: %s",
+                    user_id, item.name, rollback_error,
+                )
+            if rolled_back:
+                raise ShopError(f"Could not take the spi ({e}). Purchase cancelled.")
+            # Saying "cancelled" here would be false: they kept the role and were
+            # not charged, so someone has to take the role back by hand.
+            raise ShopError(
+                f"Could not take the spi ({e}), and the role could not be removed. "
+                f"An admin may need to remove {role.mention} by hand."
+            )
 
         await self.repo.record(
             guild_id, user_id, item.item_id, item.price, str(role.id), _utcnow()

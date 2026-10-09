@@ -14,7 +14,7 @@ The tally rules matter because they decide who pays:
 
 import unittest
 
-from src.plugins.bank.domain import TREASURY
+from src.plugins.bank.domain import TREASURY, InsufficientFunds
 from src.plugins.pulse.domain import (
     SNAP_COMPENSATION_SPI,
     SNAP_FINE_SPI,
@@ -62,17 +62,21 @@ class FakeCommunity:
 
 
 class FakeBank:
-    def __init__(self, fail_transfer=False):
+    def __init__(self, fail_transfer=False, error=None, fail_grant=False):
         self.fail_transfer = fail_transfer
+        self.error = error if error is not None else InsufficientFunds("holds 0 spi, attempted 50")
+        self.fail_grant = fail_grant
         self.transfers = []
         self.grants = []
 
     async def transfer(self, guild_id, from_user, to_user, amount, reason=""):
         if self.fail_transfer:
-            raise RuntimeError("insufficient funds")
+            raise self.error
         self.transfers.append((from_user, to_user, amount, reason))
 
     async def grant(self, guild_id, user_id, amount, reason=""):
+        if self.fail_grant:
+            raise RuntimeError("treasury unreachable")
         self.grants.append((user_id, amount, reason))
 
 
@@ -203,6 +207,27 @@ class TestSnapTrialVerdict(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result["verdict"], "guilty_broke")
         self.assertIn("broke", result["text"])
+
+    async def test_a_ledger_failure_is_not_reported_as_the_member_being_broke(self):
+        """Calling someone broke when the bank merely failed is a false public
+        statement about them, so a technical error gets its own verdict."""
+        bank = FakeBank(fail_transfer=True, error=RuntimeError("database is locked"))
+        service = _service(bank=bank)
+        result = await service.resolve_vote(
+            _pulse(), _message(guilty=[FakeUser("222"), FakeUser("333")])
+        )
+        self.assertEqual(result["verdict"], "guilty_unpaid")
+        self.assertNotIn("broke", result["text"])
+        self.assertIn("could not be collected", result["text"])
+
+    async def test_a_failed_compensation_still_acquits(self):
+        bank = FakeBank(fail_grant=True)
+        service = _service(bank=bank)
+        result = await service.resolve_vote(
+            _pulse(), _message(innocent=[FakeUser("222"), FakeUser("333")])
+        )
+        self.assertEqual(result["verdict"], "innocent")
+        self.assertEqual(bank.grants, [])
 
     async def test_verdict_text_names_the_accused_and_the_tally(self):
         service = _service()

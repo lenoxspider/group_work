@@ -154,8 +154,8 @@ class CommunityService:
             if self.bank:
                 try:
                     await self.bank.ensure_account(guild_id, user_id)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Could not provision wallet for %s: %s", user_id, e)
             await self._pay_stipend(guild_id, user_id)
             await self._chronicle_signed(guild_id, user_id)
             return member
@@ -190,8 +190,8 @@ class CommunityService:
             if self.bank:
                 try:
                     await self.bank.ensure_account(guild_id, user_id)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Could not provision wallet for %s: %s", user_id, e)
             now = utcnow()
             if as_citizen:
                 await self.repo.register(
@@ -212,7 +212,10 @@ class CommunityService:
             return []
         try:
             return await self.society.list_laws(guild_id)
-        except Exception:
+        except Exception as e:
+            # Returning [] makes the signing embed claim "no laws on the books
+            # yet" - a false statement at the exact moment someone accepts them.
+            logger.error("Could not read the constitution for %s: %s", guild_id, e)
             return []
 
     # --- Tribunal ---
