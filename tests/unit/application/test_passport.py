@@ -84,6 +84,14 @@ class TestPassportRenderer(unittest.TestCase):
         ))
         self.assertTrue(png.startswith(PNG_MAGIC))
 
+    def test_renders_with_offices_held(self):
+        png = render_passport(PassportData(
+            display_name="x", citizen_no="1", status="citizen", balance=0,
+            offices=["Magistrate", "Front Man"],
+        ))
+        self.assertTrue(png.startswith(PNG_MAGIC))
+        Image.open(io.BytesIO(png)).verify()
+
 
 class TestPassportHelpers(unittest.TestCase):
     def test_signed_label_formats_an_iso_timestamp(self):
@@ -115,6 +123,15 @@ class TestPassportHelpers(unittest.TestCase):
         self.assertEqual(_mark_symbol("something custom"), "•")
         self.assertEqual(_mark_symbol(None), "—")
         self.assertEqual(_mark_symbol(""), "—")
+
+    def test_offices_label_clamps_so_three_offices_cannot_overflow(self):
+        from src.plugins.community.passport import _offices_label
+        self.assertEqual(_offices_label(None), "—")
+        self.assertEqual(_offices_label([]), "—")
+        self.assertEqual(_offices_label(["Magistrate"]), "Magistrate")
+        clamped = _offices_label(["Magistrate", "Treasurer", "Front Man"])
+        self.assertLessEqual(len(clamped), 22)
+        self.assertTrue(clamped.endswith("…"))
 
 
 if __name__ == "__main__":

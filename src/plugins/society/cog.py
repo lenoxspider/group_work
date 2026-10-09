@@ -122,6 +122,19 @@ class SocietyCog(commands.Cog, name="Society"):
     @requires_citizen()
     async def propose(self, interaction: discord.Interaction, title: str, description: str, amount: int = 0):
         await interaction.response.defer()
+        # Spending the coffers is the Treasurer's office (Law of the Public
+        # Coffers). A non-spending proposal - policy, appointment, repeal - is
+        # any citizen's to bring.
+        if amount and amount > 0:
+            from src.plugins.offices.checks import holds_office_or_admin
+            from src.plugins.offices.domain import TREASURER
+            if not await holds_office_or_admin(interaction, TREASURER):
+                await interaction.followup.send(
+                    "Only the **Treasurer** may propose spending from the coffers. "
+                    "Bring a non-spending proposal (amount 0), or ask the Treasurer to sponsor it.",
+                    ephemeral=True,
+                )
+                return
         proposal = await self.service.propose(str(interaction.guild_id), str(interaction.user.id), title, description, amount)
         await interaction.followup.send(
             f"🗳️ **Proposal `{proposal.proposal_id}`**: {proposal.title}"

@@ -180,6 +180,18 @@ A country is a story its people share, so the state records its own history. Sig
 - **`/chronicle recent [limit]`** reads the history back; **`/chronicle state`** gives a digest of everything recorded.
 - `#chronicle` is read-only for members - only the state writes there.
 
+### 14. 🎖️ Offices of State
+The court named a Magistrate, the Law of the Public Coffers implied a Treasurer, the Games had a Front Man - but those were admin permissions nobody held. Offices makes them real: appointed, visible as hoisted roles, recorded in the chronicle, and enforced.
+
+- **Magistrate** rules the court - `/court close` requires the office.
+- **Treasurer** keeps the coffers - only they (or an admin) may propose *spending* from the treasury; any citizen may still bring a non-spending proposal.
+- **Front Man** hosts the Games.
+- One holder per office; appointing replaces and reports who it displaced. A member may hold several.
+- `/office appoint <office> <member>`, `/office vacate <office>`, `/office list` (appoint and vacate are admin).
+- The gate has an **admin fallback**: until a seat is filled, admins keep the power, so an empty Magistrate seat never freezes the court. Appointing a non-admin genuinely hands them the power.
+- Offices held appear on the member's passport.
+- Appointments and vacations are recorded in `#chronicle`.
+
 ---
 
 ## 🚀 Getting Started

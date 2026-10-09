@@ -13,6 +13,8 @@ from discord.ext import commands, tasks
 from src.domain.errors import AppError
 from src.interface.channel_router import ChannelRouter
 from src.plugins.community.checks import requires_citizen
+from src.plugins.offices.checks import requires_office
+from src.plugins.offices.domain import MAGISTRATE
 from src.plugins.community.domain import (
     CASE_ACQUITTED,
     CASE_CONVICTED,
@@ -696,6 +698,16 @@ class CommunityCog(commands.Cog, name="Community"):
                 games = await games_repo.count_survived(guild_id, user_id)
         except Exception:
             pass
+        offices = None
+        try:
+            offices_plugin = self.bot.plugins.get("offices")
+            offices_service = getattr(offices_plugin, "service", None)
+            if offices_service:
+                from src.plugins.offices.domain import OFFICE_LABELS
+                held = await offices_service.offices_held_by(guild_id, user_id)
+                offices = [OFFICE_LABELS.get(o, o) for o in held]
+        except Exception:
+            pass
 
         data = PassportData(
             display_name=interaction.user.display_name,
@@ -708,6 +720,7 @@ class CommunityCog(commands.Cog, name="Community"):
             rank=rank,
             games_survived=games,
             trials=trials,
+            offices=offices,
         )
         try:
             return await asyncio.to_thread(render_passport, data)
@@ -873,7 +886,7 @@ class CommunityCog(commands.Cog, name="Community"):
 
     @court.command(name="close", description="[Magistrate] Conclude a case and pass verdict")
     @app_commands.describe(case_id="Case ID")
-    @app_commands.checks.has_permissions(manage_channels=True)
+    @requires_office(MAGISTRATE)
     async def court_close(self, interaction: discord.Interaction, case_id: str):
         await interaction.response.defer()
         case_id = case_id.strip().upper()

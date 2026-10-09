@@ -66,6 +66,7 @@ class PassportData:
     rank: Optional[str] = None        # military rank from contribution score
     games_survived: Optional[int] = None
     trials: Optional[int] = None      # tribunal cases stood accused in
+    offices: Optional[list] = None    # labels of offices currently held
 
 
 _MARK_SYMBOLS = ("○", "△", "□")
@@ -99,6 +100,14 @@ def _signed_label(signed_at: Optional[str]) -> str:
         return datetime.fromisoformat(signed_at).strftime("%Y-%m-%d")
     except (TypeError, ValueError):
         return "NOT SIGNED"
+
+
+def _offices_label(offices) -> str:
+    """Comma-joined office labels, clamped so three of them cannot overflow."""
+    if not offices:
+        return "—"
+    joined = ", ".join(offices)
+    return joined if len(joined) <= 22 else joined[:21] + "…"
 
 
 def _field(draw, x: int, y: int, label: str, value: str) -> None:
@@ -147,7 +156,8 @@ def render_passport(data: PassportData) -> bytes:
         (303, "Rank", data.rank or "—", "Balance", f"{data.balance:,} spi"),
         (378, "Signed", _signed_label(data.signed_at),
          "Games", "—" if data.games_survived is None else str(data.games_survived)),
-        (453, "Trials", "—" if data.trials is None else str(data.trials), "", ""),
+        (453, "Trials", "—" if data.trials is None else str(data.trials),
+         "Offices", _offices_label(data.offices)),
     ]
     for y, label1, value1, label2, value2 in grid:
         _field(draw, fx, y, label1, value1)
