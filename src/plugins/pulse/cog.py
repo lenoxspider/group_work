@@ -89,6 +89,20 @@ class PulseCog(commands.Cog, name="Pulse"):
             except Exception:
                 pass
 
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction):
+        """Interactions are presence too.
+
+        Slash commands and button clicks are interactions, not messages or
+        reactions. Without this a member playing the Games or running commands
+        is invisible to the audience gate, so the bot declines to fire into a
+        room that is demonstrably occupied - which is exactly what happened:
+        a member was clicking through a Glass Bridge round while the pulse and
+        the host loop both saw an empty server.
+        """
+        if interaction.guild_id:
+            self.bot.presence.note(str(interaction.guild_id))
+
     def _minutes_since_activity(self, guild_id: str) -> Optional[float]:
         """Minutes since anyone spoke or reacted, or None if we have never seen any."""
         return self.bot.presence.minutes_since(guild_id)
