@@ -25,6 +25,7 @@ from src.plugins.community.domain import (
 )
 from src.plugins.community.intro import (
     IntroSession,
+    MarkChooserView,
     SignConstitutionView,
     StartIntroView,
     intro_embed,
@@ -93,6 +94,7 @@ class CommunityCog(commands.Cog, name="Community"):
     async def cog_load(self):
         self.bot.add_view(StartIntroView(self))
         self.bot.add_view(SignConstitutionView(self))
+        self.bot.add_view(MarkChooserView(self))
 
     # --- Channel helpers ---
 
@@ -475,6 +477,27 @@ class CommunityCog(commands.Cog, name="Community"):
         await interaction.response.defer()
         await self._perform_sign(interaction)
 
+    async def set_mark_from_button(self, interaction: discord.Interaction, mark: str) -> None:
+        """Handler for the ○ △ □ picker. Records the mark for whoever clicked."""
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except discord.NotFound:
+            return
+        guild_id = self._resolve_guild_id(interaction)
+        if not guild_id:
+            await interaction.followup.send("Run this inside the server.", ephemeral=True)
+            return
+        try:
+            await self.service.set_mark(guild_id, str(interaction.user.id), mark)
+        except Exception as e:
+            logger.warning("Could not set mark for %s: %s", interaction.user.id, e)
+            await interaction.followup.send("Could not record your mark. Try again.", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"Your mark is set: **{mark}**. Run `/me` to see it on your passport.",
+            ephemeral=True,
+        )
+
     async def _perform_sign(self, interaction: discord.Interaction) -> None:
         # Signing can also happen from a DM nudge, where guild_id is absent.
         guild_id = self._resolve_guild_id(interaction)
@@ -582,14 +605,29 @@ class CommunityCog(commands.Cog, name="Community"):
                 pass
 
         citizen_no = f"{int(user_id) % 1000000:06d}"
-        view = SignConstitutionView(self) if member.status == CATIZEN else None
+        mark = None
+        try:
+            mark = await self.service.get_mark(guild_id, user_id)
+        except Exception:
+            pass
 
-        png = await self._render_passport(interaction, member, balance, citizen_no)
+        # One view per message: catizens get the signature, citizens missing a
+        # mark get the picker, everyone else gets a clean passport.
+        hint = ""
+        if member.status == CATIZEN:
+            view = SignConstitutionView(self)
+        elif not mark:
+            view = MarkChooserView(self)
+            hint = " · choose your mark below"
+        else:
+            view = None
+
+        png = await self._render_passport(interaction, member, balance, citizen_no, mark)
         if png:
             # discord.py rejects an explicitly-passed view=None, so only include
-            # it when there is an actual button to show (catizens signing).
+            # it when there is an actual button to show.
             payload = {
-                "content": f"🛂 Passport of **{interaction.user.display_name}** · citizen no. `{citizen_no}`",
+                "content": f"🛂 Passport of **{interaction.user.display_name}** · citizen no. `{citizen_no}`{hint}",
                 "file": discord.File(io.BytesIO(png), filename="passport.png"),
             }
             if view is not None:
@@ -616,7 +654,7 @@ class CommunityCog(commands.Cog, name="Community"):
         else:
             await interaction.followup.send(embed=embed)
 
-    async def _render_passport(self, interaction, member, balance: int, citizen_no: str):
+    async def _render_passport(self, interaction, member, balance: int, citizen_no: str, mark=None):
         """Render the passport PNG, or None if anything along the way fails.
 
         Never raises: a missing Pillow, an unreachable avatar, or a render error
@@ -636,10 +674,9 @@ class CommunityCog(commands.Cog, name="Community"):
 
         # Standing is gathered from across the plugins, each read defensively so
         # a missing or failing source degrades to a dash rather than breaking /me.
-        mark = rank = None
+        rank = None
         games = trials = None
         try:
-            mark = await self.service.get_mark(guild_id, user_id)
             trials = await self.service.count_trials(guild_id, user_id)
         except Exception:
             pass

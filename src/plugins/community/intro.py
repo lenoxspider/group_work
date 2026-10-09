@@ -121,3 +121,29 @@ class SignConstitutionView(discord.ui.View):
     )
     async def sign(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.sign_from_button(interaction)
+
+
+class MarkChooserView(discord.ui.View):
+    """Persistent ○ △ □ picker for members whose mark was never recorded.
+
+    The mark is asked during the introduction, but it was only persisted from a
+    certain point onward - members who introduced themselves before that have
+    none, and their passport shows a dash. This lets them claim it. Each button
+    records the mark for whoever clicks, so it is safe on a public passport.
+    """
+
+    def __init__(self, cog):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(label="○ Circle", style=discord.ButtonStyle.secondary, custom_id="mark:circle")
+    async def circle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.set_mark_from_button(interaction, "○ Circle")
+
+    @discord.ui.button(label="△ Triangle", style=discord.ButtonStyle.secondary, custom_id="mark:triangle")
+    async def triangle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.set_mark_from_button(interaction, "△ Triangle")
+
+    @discord.ui.button(label="□ Square", style=discord.ButtonStyle.secondary, custom_id="mark:square")
+    async def square(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.set_mark_from_button(interaction, "□ Square")
