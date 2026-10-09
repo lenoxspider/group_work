@@ -111,6 +111,34 @@ class TestChronicleReconstruction(unittest.IsolatedAsyncioTestCase):
         entries = await reconstruct(self.db_path, "some-other-guild")
         self.assertEqual(entries, [])
 
+    async def test_an_open_proposal_is_not_reconstructed_as_resolved(self):
+        """The bug this guards: resolved_at='' is not NULL, so IS NOT NULL alone
+        let an still-open proposal through and recorded it as rejected."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "INSERT INTO proposals (proposal_id, guild_id, author_id, title, description, "
+                "status, approvals, rejections, created_at, resolved_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                ("PROP-OPEN", GUILD, "author", "An Open Proposal", "desc",
+                 "OPEN", "", "", "2026-10-06T00:00:00+00:00", ""))
+            await db.commit()
+        entries = await reconstruct(self.db_path, GUILD)
+        self.assertNotIn("proposal_concluded", [e[0] for e in entries])
+
+    async def test_a_resolved_proposal_is_reconstructed(self):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "INSERT INTO proposals (proposal_id, guild_id, author_id, title, description, "
+                "status, approvals, rejections, created_at, resolved_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                ("PROP-DONE", GUILD, "author", "A Passed Proposal", "desc",
+                 "APPROVED", "a,b", "", "2026-10-06T00:00:00+00:00", "2026-10-07T00:00:00+00:00"))
+            await db.commit()
+        entries = await reconstruct(self.db_path, GUILD)
+        prop = next((e for e in entries if e[0] == "proposal_concluded"), None)
+        self.assertIsNotNone(prop)
+        self.assertIn("passed", prop[1])
+
 
 if __name__ == "__main__":
     unittest.main()

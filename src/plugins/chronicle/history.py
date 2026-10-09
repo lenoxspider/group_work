@@ -67,7 +67,8 @@ async def reconstruct(db_path: str, guild_id: str) -> List[Tuple[str, str, str]]
 
         for event_id, winner, pot, ts in await db.execute_fetchall(
             "SELECT event_id, winner_id, pot_amount, concluded_at FROM games_events "
-            "WHERE guild_id = ? AND concluded_at IS NOT NULL ORDER BY concluded_at",
+            "WHERE guild_id = ? AND concluded_at IS NOT NULL AND concluded_at != '' "
+            "ORDER BY concluded_at",
             (guild_id,),
         ):
             if winner:
@@ -79,7 +80,8 @@ async def reconstruct(db_path: str, guild_id: str) -> List[Tuple[str, str, str]]
 
         for case_id, accused, status, ts in await db.execute_fetchall(
             "SELECT case_id, accused_id, status, resolved_at FROM court_cases "
-            "WHERE guild_id = ? AND resolved_at IS NOT NULL ORDER BY resolved_at",
+            "WHERE guild_id = ? AND resolved_at IS NOT NULL AND resolved_at != '' "
+            "ORDER BY resolved_at",
             (guild_id,),
         ):
             label = _VERDICT.get(status, str(status).lower())
@@ -87,7 +89,8 @@ async def reconstruct(db_path: str, guild_id: str) -> List[Tuple[str, str, str]]
 
         for pid, title, status, ts in await db.execute_fetchall(
             "SELECT proposal_id, title, status, resolved_at FROM proposals "
-            "WHERE guild_id = ? AND resolved_at IS NOT NULL ORDER BY resolved_at",
+            "WHERE guild_id = ? AND resolved_at IS NOT NULL AND resolved_at != '' "
+            "ORDER BY resolved_at",
             (guild_id,),
         ):
             verb = "passed" if status == "APPROVED" else "was rejected"
