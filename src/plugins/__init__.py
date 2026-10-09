@@ -17,6 +17,7 @@ def get_plugins(bot) -> list[Plugin]:
     from src.plugins.community.plugin import CommunityPlugin
     from src.plugins.games.plugin import GamesPlugin
     from src.plugins.groupwork.plugin import GroupworkPlugin
+    from src.plugins.offices.plugin import OfficesPlugin
     from src.plugins.pulse.plugin import PulsePlugin
     from src.plugins.radio.plugin import RadioPlugin
     from src.plugins.shop.plugin import ShopPlugin
@@ -28,6 +29,7 @@ def get_plugins(bot) -> list[Plugin]:
         ChroniclePlugin(bot),
         CommunityPlugin(bot),
         GamesPlugin(bot),
+        OfficesPlugin(bot),
         PulsePlugin(bot),
         RadioPlugin(bot),
         ShopPlugin(bot),

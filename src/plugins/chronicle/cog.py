@@ -94,6 +94,7 @@ class ChronicleCog(commands.Cog, name="Chronicle"):
             )
             return
         labels = {
+            "founding": "Founding",
             "citizen_signed": "Citizens signed",
             "court_verdict": "Court verdicts",
             "games_concluded": "Games concluded",
@@ -101,6 +102,8 @@ class ChronicleCog(commands.Cog, name="Chronicle"):
             "law_enacted": "Laws enacted",
             "law_repealed": "Laws repealed",
             "proposal_concluded": "Proposals resolved",
+            "office_appointed": "Offices appointed",
+            "office_vacated": "Offices vacated",
         }
         lines = [f"**{labels.get(k, k)}:** {v}" for k, v in sorted(counts.items())]
         embed = discord.Embed(

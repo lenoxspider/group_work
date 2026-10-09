@@ -101,6 +101,22 @@ class AdminCog(commands.Cog, name="Administration"):
                 except Exception as e:
                     logger.warning("Could not auto-create Citizen role in guild %s: %s", guild.id, e)
 
+            # Offices of state. Colourless and hoisted like Citizen - a colour
+            # here would outrank the shop cosmetics people paid for, but hoisting
+            # still gives each office its own visible group in the member list.
+            for office_name in ("Magistrate", "Treasurer", "Front Man"):
+                if not discord.utils.get(guild.roles, name=office_name):
+                    try:
+                        await guild.create_role(
+                            name=office_name,
+                            color=discord.Color.default(),
+                            hoist=True,
+                            mentionable=True,
+                            reason=f"Office of state: {office_name}"
+                        )
+                    except Exception as e:
+                        logger.warning("Could not auto-create %s role in guild %s: %s", office_name, guild.id, e)
+
         # Hierarchy check
         if player_role and guild.me.top_role.position <= player_role.position:
             hierarchy_warning = (
