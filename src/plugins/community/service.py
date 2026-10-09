@@ -95,6 +95,15 @@ class CommunityService:
         nudge_before = (now - timedelta(hours=SIGN_NUDGE_COOLDOWN_HOURS)).isoformat(timespec="seconds")
         return await self.repo.list_unstarted_catizens(guild_id, joined_before, nudge_before)
 
+    async def set_mark(self, guild_id: str, user_id: str, mark: str) -> None:
+        await self.repo.set_mark(guild_id, user_id, mark)
+
+    async def get_mark(self, guild_id: str, user_id: str) -> Optional[str]:
+        return await self.repo.get_mark(guild_id, user_id)
+
+    async def count_trials(self, guild_id: str, user_id: str) -> int:
+        return await self.repo.count_trials(guild_id, user_id)
+
     async def on_join(self, guild_id: str, user_id: str) -> Optional[Member]:
         existing = await self.repo.get_member(guild_id, user_id)
         if existing:

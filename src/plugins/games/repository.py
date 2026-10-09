@@ -173,6 +173,17 @@ class SQLiteGamesRepository:
                 rows = await cur.fetchall()
                 return [self._row_to_player(r) for r in rows]
 
+    async def count_survived(self, guild_id: str, user_id: str) -> int:
+        """Events this member was still standing at the end of."""
+        async with connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM games_players "
+                "WHERE guild_id = ? AND user_id = ? AND is_alive = 1",
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+                return row[0] if row else 0
+
     async def get_next_number(self, guild_id: str, event_id: str) -> str:
         async with connect(self.db_path) as db:
             async with db.execute(

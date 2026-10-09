@@ -62,6 +62,23 @@ class PassportData:
     balance: int
     signed_at: Optional[str] = None   # ISO timestamp or None
     avatar_bytes: Optional[bytes] = None
+    mark: Optional[str] = None        # the ○ △ □ they bear, from the intro
+    rank: Optional[str] = None        # military rank from contribution score
+    games_survived: Optional[int] = None
+    trials: Optional[int] = None      # tribunal cases stood accused in
+
+
+_MARK_SYMBOLS = ("○", "△", "□")
+
+
+def _mark_symbol(mark: Optional[str]) -> str:
+    """Pull the ○/△/□ out of the intro answer, or a dot if it was free-text."""
+    if not mark:
+        return "—"
+    for symbol in _MARK_SYMBOLS:
+        if symbol in mark:
+            return symbol
+    return "•"
 
 
 def _photo(avatar_bytes: Optional[bytes]) -> Image.Image:
@@ -113,21 +130,29 @@ def render_passport(data: PassportData) -> bytes:
     photo = _photo(data.avatar_bytes)
     img.paste(photo, (48, 152))
     draw.rectangle([48, 152, 48 + PHOTO_W, 152 + PHOTO_H], outline=PINK, width=2)
-    draw.text((48, 152 + PHOTO_H + 10), "BEARER", font=_font(tuple(_REG), 14), fill=MUTED)
 
-    # Fields
-    fx = 300
-    rows = [
-        ("Name", data.display_name),
-        ("Citizen No.", data.citizen_no),
-        ("Status", data.status.upper()),
-        ("Balance", f"{data.balance:,} spi"),
-        ("Signed", _signed_label(data.signed_at)),
+    # The mark they bear, centred under the photo
+    mark_cx = 48 + PHOTO_W // 2
+    draw.text((mark_cx, 152 + PHOTO_H + 40), _mark_symbol(data.mark), anchor="mm",
+              font=_font(tuple(_BOLD), 50), fill=PINK)
+    draw.text((mark_cx, 152 + PHOTO_H + 74), "MARK", anchor="mm",
+              font=_font(tuple(_REG), 13), fill=MUTED)
+
+    # Fields, two columns. Name gets its own full-width row.
+    fx, cx2 = 300, 650
+    name = data.display_name if len(data.display_name) <= 26 else data.display_name[:25] + "…"
+    _field(draw, fx, 150, "Name", name)
+    grid = [
+        (228, "Citizen No.", data.citizen_no, "Status", data.status.upper()),
+        (303, "Rank", data.rank or "—", "Balance", f"{data.balance:,} spi"),
+        (378, "Signed", _signed_label(data.signed_at),
+         "Games", "—" if data.games_survived is None else str(data.games_survived)),
+        (453, "Trials", "—" if data.trials is None else str(data.trials), "", ""),
     ]
-    y = 152
-    for label, value in rows:
-        _field(draw, fx, y, label, value)
-        y += 62
+    for y, label1, value1, label2, value2 in grid:
+        _field(draw, fx, y, label1, value1)
+        if label2:
+            _field(draw, cx2, y, label2, value2)
 
     # Machine-readable zone (decorative)
     mono = _font(tuple(_MONO), 18)

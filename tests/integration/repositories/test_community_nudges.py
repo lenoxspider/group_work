@@ -167,6 +167,30 @@ class TestCommunityNudgeQueries(unittest.IsolatedAsyncioTestCase):
         got = [m.user_id for m in await self.repo.list_pending_signers(GUILD, self.day_ago.isoformat())]
         self.assertEqual(got, ["here"])
 
+    async def test_mark_round_trips(self):
+        await self._add("u1", CATIZEN, True, self.old)
+        self.assertIsNone(await self.repo.get_mark(GUILD, "u1"))
+        await self.repo.set_mark(GUILD, "u1", "△ Triangle")
+        self.assertEqual(await self.repo.get_mark(GUILD, "u1"), "△ Triangle")
+
+    async def test_mark_defaults_to_none_for_existing_members(self):
+        await self._add("u1", CITIZEN, True, self.old, signed_at=_iso(self.old))
+        self.assertIsNone(await self.repo.get_mark(GUILD, "u1"))
+
+    async def test_count_trials_counts_cases_as_accused(self):
+        from src.infrastructure.database.sqlite import connect
+        async with connect(self.db_path) as db:
+            for i, accused in enumerate(["u1", "u1", "u2"]):
+                await db.execute(
+                    "INSERT INTO court_cases (case_id, guild_id, accuser_id, accused_id, "
+                    "law_id, created_at, opened_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (f"C{i}", GUILD, "accuser", accused, "LAW-X", "t", "t"),
+                )
+            await db.commit()
+        self.assertEqual(await self.repo.count_trials(GUILD, "u1"), 2)
+        self.assertEqual(await self.repo.count_trials(GUILD, "u2"), 1)
+        self.assertEqual(await self.repo.count_trials(GUILD, "u3"), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

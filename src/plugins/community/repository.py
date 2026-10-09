@@ -82,6 +82,27 @@ class SQLiteCommunityRepository:
             await db.execute(query, (ts, guild_id, user_id))
             await db.commit()
 
+    async def set_mark(self, guild_id: str, user_id: str, mark: str) -> None:
+        query = "UPDATE member_registry SET mark = ? WHERE guild_id = ? AND user_id = ?"
+        async with connect(self.db_path) as db:
+            await db.execute(query, (mark, guild_id, user_id))
+            await db.commit()
+
+    async def get_mark(self, guild_id: str, user_id: str) -> Optional[str]:
+        query = "SELECT mark FROM member_registry WHERE guild_id = ? AND user_id = ?"
+        async with connect(self.db_path) as db:
+            async with db.execute(query, (guild_id, user_id)) as cur:
+                row = await cur.fetchone()
+                return row[0] if row else None
+
+    async def count_trials(self, guild_id: str, user_id: str) -> int:
+        """How many tribunal cases this member has stood accused in."""
+        query = "SELECT COUNT(*) FROM court_cases WHERE guild_id = ? AND accused_id = ?"
+        async with connect(self.db_path) as db:
+            async with db.execute(query, (guild_id, user_id)) as cur:
+                row = await cur.fetchone()
+                return row[0] if row else 0
+
     async def list_unstarted_catizens(
         self, guild_id: str, joined_before: str, nudge_before: str
     ) -> List[Member]:

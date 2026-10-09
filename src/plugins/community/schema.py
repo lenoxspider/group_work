@@ -38,4 +38,5 @@ COMMUNITY_SCHEMA = [
 
 COMMUNITY_MIGRATIONS = [
     ("member_registry", "sign_nudge_at", "TEXT"),
+    ("member_registry", "mark", "TEXT"),
 ]

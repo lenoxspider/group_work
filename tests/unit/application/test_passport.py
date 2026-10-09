@@ -68,6 +68,22 @@ class TestPassportRenderer(unittest.TestCase):
         ))
         self.assertTrue(png.startswith(PNG_MAGIC))
 
+    def test_renders_with_every_enrichment_field(self):
+        png = render_passport(PassportData(
+            display_name="yoof1337", citizen_no="456123", status="citizen",
+            balance=3150, signed_at="2026-09-28T15:54:37+00:00",
+            avatar_bytes=_png_bytes(), mark="△ Triangle",
+            rank="General Secretary 👑", games_survived=2, trials=1,
+        ))
+        self.assertTrue(png.startswith(PNG_MAGIC))
+        Image.open(io.BytesIO(png)).verify()
+
+    def test_enrichment_fields_default_to_none_and_still_render(self):
+        png = render_passport(PassportData(
+            display_name="x", citizen_no="1", status="catizen", balance=0,
+        ))
+        self.assertTrue(png.startswith(PNG_MAGIC))
+
 
 class TestPassportHelpers(unittest.TestCase):
     def test_signed_label_formats_an_iso_timestamp(self):
@@ -87,6 +103,18 @@ class TestPassportHelpers(unittest.TestCase):
         self.assertTrue(l1.startswith("P<CVL"))
         self.assertNotIn(" ", l1)
         self.assertNotIn("!", l1)
+
+    def test_mark_symbol_is_extracted_from_the_intro_answer(self):
+        from src.plugins.community.passport import _mark_symbol
+        self.assertEqual(_mark_symbol("△ Triangle"), "△")
+        self.assertEqual(_mark_symbol("○ Circle"), "○")
+        self.assertEqual(_mark_symbol("□ Square"), "□")
+
+    def test_mark_symbol_falls_back_for_free_text_and_missing(self):
+        from src.plugins.community.passport import _mark_symbol
+        self.assertEqual(_mark_symbol("something custom"), "•")
+        self.assertEqual(_mark_symbol(None), "—")
+        self.assertEqual(_mark_symbol(""), "—")
 
 
 if __name__ == "__main__":

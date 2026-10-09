@@ -216,6 +216,13 @@ class CommunityCog(commands.Cog, name="Community"):
         self._intro.pop(user_id, None)
 
         answers = session.answers + [""] * (4 - len(session.answers))
+        # The mark (○ △ □) was asked for and then thrown away. Persist it so the
+        # passport - and anything else that wants to know who they are - can use it.
+        if answers[3]:
+            try:
+                await self.service.set_mark(str(guild.id), user_id, answers[3])
+            except Exception as e:
+                logger.warning("Could not record mark for %s: %s", user_id, e)
         nr = await self._new_recruits_channel(guild)
         if nr:
             embed = discord.Embed(title="🎖️ A comrade presents themselves", color=PINK)
@@ -620,10 +627,39 @@ class CommunityCog(commands.Cog, name="Community"):
         except Exception as e:
             logger.warning("Passport renderer unavailable: %s", e)
             return None
+        guild_id = str(interaction.guild_id)
+        user_id = str(interaction.user.id)
         try:
             avatar = await interaction.user.display_avatar.with_size(256).read()
         except Exception:
             avatar = None
+
+        # Standing is gathered from across the plugins, each read defensively so
+        # a missing or failing source degrades to a dash rather than breaking /me.
+        mark = rank = None
+        games = trials = None
+        try:
+            mark = await self.service.get_mark(guild_id, user_id)
+            trials = await self.service.count_trials(guild_id, user_id)
+        except Exception:
+            pass
+        try:
+            groupwork = self.bot.plugins.get("groupwork")
+            activity_repo = getattr(groupwork, "activity_repo", None)
+            if activity_repo:
+                activity = await activity_repo.get_activity(guild_id, user_id)
+                if activity:
+                    rank = activity.rank_title
+        except Exception:
+            pass
+        try:
+            games_plugin = self.bot.plugins.get("games")
+            games_repo = getattr(games_plugin, "repo", None)
+            if games_repo:
+                games = await games_repo.count_survived(guild_id, user_id)
+        except Exception:
+            pass
+
         data = PassportData(
             display_name=interaction.user.display_name,
             citizen_no=citizen_no,
@@ -631,6 +667,10 @@ class CommunityCog(commands.Cog, name="Community"):
             balance=balance,
             signed_at=member.signed_at,
             avatar_bytes=avatar,
+            mark=mark,
+            rank=rank,
+            games_survived=games,
+            trials=trials,
         )
         try:
             return await asyncio.to_thread(render_passport, data)
