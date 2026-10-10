@@ -161,6 +161,21 @@ class AdminCog(commands.Cog, name="Administration"):
                 "reconcile_citizen_roles not found (cog=%s)", type(community_cog).__name__
             )
 
+        # Same for the offices of state - /setup is what creates those roles, so
+        # this is also the first moment they can be handed to their holders.
+        offices_cog = self.bot.get_cog("Offices")
+        reconcile_offices = getattr(offices_cog, "reconcile_office_roles", None)
+        if reconcile_offices:
+            try:
+                await reconcile_offices(guild)
+            except Exception as e:
+                logger.warning("Could not reconcile office roles during setup: %s", e)
+        else:
+            logger.warning(
+                "Skipping office role reconcile: offices cog or "
+                "reconcile_office_roles not found (cog=%s)", type(offices_cog).__name__
+            )
+
         return created_or_found, hierarchy_warning
 
     @commands.Cog.listener()
