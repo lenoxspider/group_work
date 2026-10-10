@@ -101,8 +101,9 @@ class DeadlinesCog(commands.Cog, name="Milestones"):
             try:
                 if deadlines_ch.permissions_for(guild.me).manage_messages:
                     await msg.pin()
-            except Exception:
-                pass
+            except Exception as e:
+                # An unpinned milestone still counts down and still completes.
+                logger.info("Milestone message could not be pinned: %s", e)
 
             dto = CreateDeadlineDTO(
                 guild_id=str(guild.id),
@@ -129,9 +130,12 @@ class DeadlinesCog(commands.Cog, name="Milestones"):
         await interaction.response.defer()
         try:
             result = await self.service.complete_deadline(deadline_id.strip().upper())
-            ch = self.bot.get_channel(int(result.channel_id))
-            if ch:
-                try:
+            try:
+                # The conversion belongs inside the guard. Outside it, a malformed
+                # channel id escapes as a ValueError after the milestone was already
+                # marked complete, and the member is told the command failed.
+                ch = self.bot.get_channel(int(result.channel_id))
+                if ch:
                     msg = await ch.fetch_message(int(result.message_id))
                     embed = build_deadline_embed(result)
                     embed.title = f"✅ FINISHED: {result.name}"
@@ -139,8 +143,11 @@ class DeadlinesCog(commands.Cog, name="Milestones"):
                     await msg.edit(embed=embed)
                     if msg.pinned and ch.permissions_for(interaction.guild.me).manage_messages:
                         await msg.unpin()
-                except Exception:
-                    pass
+            except Exception as e:
+                logger.warning(
+                    "Milestone %s was completed but its pinned card is now stale: %s",
+                    result.deadline_id, e,
+                )
 
             await interaction.followup.send(f"🎉 Milestone **{result.name}** marked as completed!")
         except AppError as e:
@@ -182,7 +189,14 @@ class DeadlinesCog(commands.Cog, name="Milestones"):
                 if not ch:
                     try:
                         ch = await self.bot.fetch_channel(int(act.channel_id))
-                    except Exception:
+                    except Exception as e:
+                        # Not acknowledged, so this retries every tick until the
+                        # channel comes back. Retrying is right; retrying silently
+                        # means a frozen milestone countdown is undiagnosable.
+                        logger.warning(
+                            "Countdown channel %s for milestone %s is unreachable (%s); will retry",
+                            act.channel_id, act.deadline_id, e,
+                        )
                         continue
 
                 abs_ts, rel_ts = format_discord_timestamps(act.due_datetime)

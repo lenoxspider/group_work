@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from src.domain.errors import AppError
+from src.domain.errors import AppError, ValidationError
 from src.interface.channel_router import ChannelRouter
 from src.plugins.community.checks import requires_citizen
 from src.plugins.offices.checks import requires_office
@@ -169,8 +169,10 @@ class CommunityCog(commands.Cog, name="Community"):
                 "2. Run `/join` to sign the constitution and unlock voting.\n\n"
                 "`/guide` lists every command. `/me` shows your standing."
             )
-        except Exception:
-            pass
+        except Exception as e:
+            # Closed DMs are ordinary and not worth a warning, but a new catizen
+            # who never receives the two steps to citizenship is invisible otherwise.
+            logger.info("Welcome DM to %s did not arrive: %s", user_id, e)
 
     # --- Prompted introduction ---
 
@@ -248,8 +250,8 @@ class CommunityCog(commands.Cog, name="Community"):
                     description=f"🎖️ Everyone welcome <@{user_id}> - a new comrade has presented themselves.",
                     color=PINK,
                 ))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Introduction recorded for %s but the town hall was not told: %s", user_id, e)
 
         final = (
             "✅ **Introduction complete.** Task #1 cleared"
@@ -280,23 +282,49 @@ class CommunityCog(commands.Cog, name="Community"):
             return
         try:
             case = await self.service.get_case_by_message(str(payload.message_id))
-        except Exception:
+        except Exception as e:
+            # Returning is right - without the case there is nothing to vote on - but
+            # it must not be quiet. From the floor, a juror reacting to a live trial
+            # and having nothing happen is indistinguishable from the bot ignoring
+            # them, and only the log can tell those apart.
+            logger.error(
+                "Could not look up the case for a vote reaction on message %s: %s",
+                payload.message_id, e,
+            )
             return
         if not case or case.status != CASE_OPEN:
             return
         decision = "guilty" if emoji == GUILTY_EMOJI else "innocent"
         try:
             updated = await self.service.court_vote(case.guild_id, case.case_id, str(payload.user_id), decision)
-            await self._refresh_case_card(updated)
-        except Exception:
-            # invalid voter (catizen / conflicted) - strip their reaction
-            try:
-                channel = self.bot.get_channel(payload.channel_id)
-                if channel:
-                    msg = await channel.fetch_message(payload.message_id)
-                    await msg.remove_reaction(payload.emoji, discord.Object(id=payload.user_id))
-            except Exception:
-                pass
+        except ValidationError:
+            # The only rejection that means "this voter does not count": a
+            # catizen, the accuser or accused, a closed case, a bad decision.
+            # Strip the reaction so the card does not show a vote that cannot
+            # be tallied.
+            await self._strip_reaction(payload)
+            return
+        except Exception as e:
+            # Anything else - a failed write, a storage error - is our failure,
+            # not proof the voter was ineligible. Leave the reaction alone:
+            # stripping it would silently destroy a citizen's judgement and
+            # remove the only evidence that they ever cast it.
+            logger.error(
+                "Court vote by %s on %s failed and was NOT discarded as ineligible: %s",
+                payload.user_id, case.case_id, e, exc_info=True,
+            )
+            return
+        await self._refresh_case_card(updated)
+
+    async def _strip_reaction(self, payload: discord.RawReactionActionEvent) -> None:
+        """Remove a reaction that cannot count as a vote."""
+        try:
+            channel = self.bot.get_channel(payload.channel_id)
+            if channel:
+                msg = await channel.fetch_message(payload.message_id)
+                await msg.remove_reaction(payload.emoji, discord.Object(id=payload.user_id))
+        except Exception as e:
+            logger.warning("Could not strip an ineligible vote reaction: %s", e)
 
     async def _refresh_case_card(self, case: Case):
         if case.message_id and case.channel_id:
@@ -324,8 +352,13 @@ class CommunityCog(commands.Cog, name="Community"):
                 if tribunal:
                     try:
                         await tribunal.send(embed=_verdict_embed(closed))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        # The case is closed and the fine levied. A verdict nobody can
+                        # read is indistinguishable, from the floor, from no trial.
+                        logger.error(
+                            "Case %s was closed but its verdict could not be posted: %s",
+                            case.case_id, e,
+                        )
             for sentence in result["sentenced"]:
                 await self._post_sentence(guild, sentence)
 
@@ -577,8 +610,8 @@ class CommunityCog(commands.Cog, name="Community"):
                         ),
                         color=PINK,
                     ))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("Citizen %s signed but the town hall was not told: %s", user_id, e)
 
     def _resolve_guild_id(self, interaction: discord.Interaction) -> Optional[str]:
         """Guild id for an interaction, falling back for DM-originated buttons."""
@@ -599,26 +632,32 @@ class CommunityCog(commands.Cog, name="Community"):
         user_id = str(interaction.user.id)
 
         member = await self.service.get_member(guild_id, user_id)
-        balance = 0
+        balance = None
         if self.service.bank:
             try:
                 balance = await self.service.bank.balance(guild_id, user_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("Could not read the balance for /me (%s): %s", user_id, e)
 
         citizen_no = f"{int(user_id) % 1000000:06d}"
         mark = None
+        mark_known = True
         try:
             mark = await self.service.get_mark(guild_id, user_id)
-        except Exception:
-            pass
+        except Exception as e:
+            # Remember that the read failed rather than treating it as "unset".
+            mark_known = False
+            logger.error("Could not read the mark for /me (%s): %s", user_id, e)
 
         # One view per message: catizens get the signature, citizens missing a
         # mark get the picker, everyone else gets a clean passport.
         hint = ""
         if member.status == CATIZEN:
             view = SignConstitutionView(self)
-        elif not mark:
+        elif not mark and mark_known:
+            # Only offer the picker when we actually know the mark is unset.
+            # Handing it to someone whose mark merely failed to load tells them
+            # their choice was lost, and invites them to pick a second one.
             view = MarkChooserView(self)
             hint = " · choose your mark below"
         else:
@@ -648,7 +687,8 @@ class CommunityCog(commands.Cog, name="Community"):
         embed = discord.Embed(title=f"Identity of {interaction.user.display_name}", color=PINK)
         embed.add_field(name="Membership", value=f"**{status_display}**", inline=True)
         embed.add_field(name="Intro task", value=intro, inline=True)
-        embed.add_field(name="Wallet", value=f"`{balance:,} spi`", inline=True)
+        wallet = f"`{balance:,} spi`" if balance is not None else "`could not be read`"
+        embed.add_field(name="Wallet", value=wallet, inline=True)
         if member.status == CATIZEN:
             embed.set_footer(text="Sign below (or run /join) to become a citizen.")
         if view is not None:
@@ -656,7 +696,7 @@ class CommunityCog(commands.Cog, name="Community"):
         else:
             await interaction.followup.send(embed=embed)
 
-    async def _render_passport(self, interaction, member, balance: int, citizen_no: str, mark=None):
+    async def _render_passport(self, interaction, member, balance: Optional[int], citizen_no: str, mark=None):
         """Render the passport PNG, or None if anything along the way fails.
 
         Never raises: a missing Pillow, an unreachable avatar, or a render error
@@ -672,6 +712,7 @@ class CommunityCog(commands.Cog, name="Community"):
         try:
             avatar = await interaction.user.display_avatar.with_size(256).read()
         except Exception:
+            logger.info("No avatar for %s's passport; rendering without one", user_id)
             avatar = None
 
         # Standing is gathered from across the plugins, each read defensively so
@@ -680,8 +721,8 @@ class CommunityCog(commands.Cog, name="Community"):
         games = trials = None
         try:
             trials = await self.service.count_trials(guild_id, user_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Passport for %s is missing its trial count: %s", user_id, e)
         try:
             groupwork = self.bot.plugins.get("groupwork")
             activity_repo = getattr(groupwork, "activity_repo", None)
@@ -689,15 +730,15 @@ class CommunityCog(commands.Cog, name="Community"):
                 activity = await activity_repo.get_activity(guild_id, user_id)
                 if activity:
                     rank = activity.rank_title
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Passport for %s is missing its rank: %s", user_id, e)
         try:
             games_plugin = self.bot.plugins.get("games")
             games_repo = getattr(games_plugin, "repo", None)
             if games_repo:
                 games = await games_repo.count_survived(guild_id, user_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Passport for %s is missing its games survived: %s", user_id, e)
         offices = None
         try:
             offices_plugin = self.bot.plugins.get("offices")
@@ -706,8 +747,8 @@ class CommunityCog(commands.Cog, name="Community"):
                 from src.plugins.offices.domain import OFFICE_LABELS
                 held = await offices_service.offices_held_by(guild_id, user_id)
                 offices = [OFFICE_LABELS.get(o, o) for o in held]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Passport for %s is missing its offices: %s", user_id, e)
 
         data = PassportData(
             display_name=interaction.user.display_name,
@@ -922,19 +963,47 @@ class CommunityCog(commands.Cog, name="Community"):
             await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
             return
         await self._refresh_case_card(case)
+        # appeal_case() above is what actually reopens the conviction, so the
+        # appeal is granted whatever happens next. What can still fail is the
+        # machinery for voting on it, and promising "fresh jury, fresh vote"
+        # while that machinery is missing sends the appellant to a tribunal
+        # where no vote can ever be cast.
         tribunal = await self._tribunal_channel(interaction.guild)
+        card = None
         if tribunal:
             try:
                 law = await self._law(case.law_id)
-                msg = await tribunal.send(embed=_case_embed(case, law.title if law else case.law_id, law.fine_amount if law else 0))
-                case.message_id = str(msg.id)
+                card = await tribunal.send(embed=_case_embed(case, law.title if law else case.law_id, law.fine_amount if law else 0))
+                case.message_id = str(card.id)
                 case.channel_id = str(tribunal.id)
                 await self.service.repo.save_case(case)
-                await msg.add_reaction(GUILTY_EMOJI)
-                await msg.add_reaction(INNOCENT_EMOJI)
-            except Exception:
-                pass
-        await interaction.followup.send(f"⚖️ **Appeal granted** on `{case.case_id}`. Fresh jury, fresh vote.")
+            except Exception as e:
+                card = None
+                logger.error(
+                    "Appeal on %s was granted but its case card could not be posted: %s",
+                    case.case_id, e, exc_info=True,
+                )
+        else:
+            logger.error("Appeal on %s was granted but no tribunal channel is bound", case.case_id)
+
+        if card is not None:
+            # The reactions are how the jury votes. /court vote still works
+            # without them, so a failure here degrades rather than dead-ends.
+            for emoji in (GUILTY_EMOJI, INNOCENT_EMOJI):
+                try:
+                    await card.add_reaction(emoji)
+                except Exception as e:
+                    logger.error(
+                        "Could not add %s to the appeal card for %s - the jury must use /court vote: %s",
+                        emoji, case.case_id, e,
+                    )
+            await interaction.followup.send(f"⚖️ **Appeal granted** on `{case.case_id}`. Fresh jury, fresh vote.")
+        else:
+            await interaction.followup.send(
+                f"⚖️ **Appeal granted** on `{case.case_id}` - the conviction is reopened. "
+                "The fresh case card could not be posted, so the jury votes with "
+                f"`/court vote case_id:{case.case_id}` rather than by reaction."
+            )
 
     @court.command(name="case", description="View a case")
     @app_commands.describe(case_id="Case ID")
@@ -985,12 +1054,19 @@ class CommunityCog(commands.Cog, name="Community"):
                         f"🚨 **{case.case_id}**: <@{case.accused_id}> was convicted under `{case.law_id}` "
                         f"but holds no spi to burn. Shame is the sentence."
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(
+                        "%s was convicted and could not pay, but the wall of shame post failed: %s",
+                        case.case_id, e,
+                    )
         try:
             await tribunal.send("\n".join(lines))
-        except Exception:
-            pass
+        except Exception as e:
+            # The sentence has already been carried out against their balance.
+            logger.error(
+                "Sentence for %s was carried out but could not be announced: %s",
+                case.case_id, e,
+            )
 
 
 def _verdict_embed(result: dict) -> discord.Embed:

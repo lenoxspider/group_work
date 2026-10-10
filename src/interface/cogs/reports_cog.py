@@ -10,6 +10,7 @@ What it does NOT do:
 """
 
 import io
+import logging
 from typing import Optional
 import discord
 from discord import app_commands
@@ -22,6 +23,8 @@ from src.interface.discord_formatters import (
     build_member_report_embed,
     build_guild_report_embed
 )
+
+logger = logging.getLogger("interface.cogs.reports")
 
 class ReportsCog(commands.Cog, name="Contribution Reports"):
     """Interface adapter for anti-free-riding contribution reports."""
@@ -73,8 +76,10 @@ class ReportsCog(commands.Cog, name="Contribution Reports"):
                         SynthesizeRequestDTO(text=script, user_id=str(member.id), tone="serious")
                     )
                     voice_file = discord.File(io.BytesIO(clip.audio_bytes), filename="member_report.wav")
-                except Exception:
-                    pass
+                except Exception as e:
+                    # The text report still arrives, which is the right degradation -
+                    # but "the audio never works" should be discoverable from the log.
+                    logger.warning("Voice synthesis failed for the member report; sent text only: %s", e)
             await interaction.followup.send(embed=embed, file=voice_file)
             return
 
@@ -100,7 +105,7 @@ class ReportsCog(commands.Cog, name="Contribution Reports"):
             try:
                 clip = await self.voice_service.synthesize(SynthesizeRequestDTO(text=script, tone="serious"))
                 voice_file = discord.File(io.BytesIO(clip.audio_bytes), filename="guild_report.wav")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Voice synthesis failed for the guild report; sent text only: %s", e)
 
         await interaction.followup.send(embed=embed, file=voice_file)

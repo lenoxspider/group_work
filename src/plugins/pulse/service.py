@@ -143,7 +143,7 @@ class PulseService:
 
     # --- Vote mode (Snap Trial) ---
 
-    async def resolve_vote(self, pulse: ActivePulse, message: discord.Message) -> dict:
+    async def resolve_vote(self, pulse: ActivePulse, message: Optional[discord.Message]) -> dict:
         counts = await self._tally(pulse, message)
         if pulse.kind == "snap_trial":
             result = await self._snap_verdict(pulse, counts)
@@ -152,10 +152,17 @@ class PulseService:
             return result
         return {"text": f"⌛ **{pulse.label}** closed.", "verdict": "closed"}
 
-    async def _tally(self, pulse: ActivePulse, message: discord.Message) -> dict:
+    async def _tally(self, pulse: ActivePulse, message: Optional[discord.Message]) -> dict:
+        """Count the votes. A message we could not fetch tallies as no votes.
+
+        The vote message can be deleted before the pulse expires. When that
+        happens there is nothing to read, and the honest answer is an empty
+        tally - which resolves as a silent jury - rather than an AttributeError
+        that would destroy the verdict and the fine with it.
+        """
         accused_id = pulse.data.get("accused_id")
         voter_choices: dict = {}
-        for reaction in message.reactions:
+        for reaction in (message.reactions if message is not None else []):
             emoji = str(reaction.emoji)
             if emoji not in pulse.vote_options:
                 continue

@@ -31,17 +31,26 @@ class ShopCog(commands.Cog, name="Shop"):
         user_id = str(interaction.user.id)
 
         owned = set(await self.service.owned(guild_id, user_id))
-        balance = 0
+        # None, not 0: a failed ledger read must not be reported as poverty. The
+        # cheapest cosmetic costs 300 spi, so "0 spi" reads as "you can never
+        # afford anything" - a lie told about someone's own money.
+        balance = None
         if self.service.bank:
             try:
                 balance = await self.service.bank.balance(guild_id, user_id)
             except Exception:
-                pass
+                logger.error("Could not read the balance for /shop view (%s)", user_id, exc_info=True)
+
+        holding = (
+            f"You hold **{balance:,} spi**."
+            if balance is not None
+            else "Your balance could not be read just now - the prices below are still correct."
+        )
 
         embed = discord.Embed(
             title="🛍️ THE SHOP",
             description=(
-                f"You hold **{balance:,} spi**. Everything here is bought once, kept forever, "
+                f"{holding} Everything here is bought once, kept forever, "
                 "and **burned on purchase** - it leaves circulation for good.\n\n"
                 "Buy with `/shop buy item:<id>`."
             ),

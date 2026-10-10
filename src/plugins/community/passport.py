@@ -59,7 +59,7 @@ class PassportData:
     display_name: str
     citizen_no: str
     status: str                       # "CITIZEN" | "CATIZEN"
-    balance: int
+    balance: Optional[int]            # None when the ledger could not be read
     signed_at: Optional[str] = None   # ISO timestamp or None
     avatar_bytes: Optional[bytes] = None
     mark: Optional[str] = None        # the ○ △ □ they bear, from the intro
@@ -153,7 +153,11 @@ def render_passport(data: PassportData) -> bytes:
     _field(draw, fx, 150, "Name", name)
     grid = [
         (228, "Citizen No.", data.citizen_no, "Status", data.status.upper()),
-        (303, "Rank", data.rank or "—", "Balance", f"{data.balance:,} spi"),
+        # None is not zero. A passport that printed "0 spi" because a ledger read
+        # failed would be a forged document - it would tell a solvent citizen they
+        # were broke, on the one record meant to be authoritative about them.
+        (303, "Rank", data.rank or "—", "Balance",
+         f"{data.balance:,} spi" if data.balance is not None else "unavailable"),
         (378, "Signed", _signed_label(data.signed_at),
          "Games", "—" if data.games_survived is None else str(data.games_survived)),
         (453, "Trials", "—" if data.trials is None else str(data.trials),

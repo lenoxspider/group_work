@@ -270,8 +270,8 @@ class AdminCog(commands.Cog, name="Administration"):
                 if ch and guild.me.guild_permissions.manage_channels:
                     try:
                         await ch.edit(topic=f"[ARCHIVED] - Completed on {date_str}. Preserved in read-only mode.")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("Could not mark #%s as archived: %s", name, e)
 
             retrospective_embed = build_project_archive_embed(summary_dto, guild.name)
 

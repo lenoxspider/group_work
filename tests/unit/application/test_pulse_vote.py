@@ -190,6 +190,22 @@ class TestSnapTrialVerdict(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bank.transfers, [])
         self.assertEqual(bank.grants, [])
 
+    async def test_an_unfetchable_vote_message_resolves_as_silence(self):
+        """The vote message can be deleted before the pulse expires.
+
+        _tally dereferenced message.reactions unconditionally, so passing None
+        raised AttributeError inside the one handler that also produced the verdict
+        - destroying the outcome, and leaving nothing in the log to show a jury had
+        ever voted. An unreadable message means no votes could be read, which is
+        silence rather than a crash.
+        """
+        bank = FakeBank()
+        service = _service(bank=bank)
+        result = await service.resolve_vote(_pulse(), None)
+        self.assertEqual(result["verdict"], "silent")
+        self.assertEqual(bank.transfers, [])
+        self.assertEqual(bank.grants, [])
+
     async def test_bot_only_votes_count_as_silence(self):
         bank = FakeBank()
         service = _service(bank=bank)

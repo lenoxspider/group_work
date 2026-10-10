@@ -118,10 +118,15 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
             for act in actions:
                 # One malformed task must never silence the ladder for everyone else.
                 try:
-                    # Idempotency check: prevent duplicate reminders on reboot
-                    fire_record = AlertFire(task_id=act.task_id, alert_tier=act.reminder_tier, fired_at=now)
-                    first_fire = await self.alert_fire_repo.record_fire(fire_record)
-                    if not first_fire:
+                    # Idempotency check: prevent duplicate reminders on reboot.
+                    # The fire is recorded only once the reminder has actually been
+                    # delivered. Recording it up front - as this did - meant a failed
+                    # send was suppressed forever, because both this table and
+                    # acknowledge_reminder would then report a tier as fired that the
+                    # member was never told about. The same premature record silently
+                    # ate reminders deferred by quiet hours and reminders whose user
+                    # could not be fetched.
+                    if await self.alert_fire_repo.has_fired(act.task_id, act.reminder_tier):
                         continue
 
                     abs_ts, rel_ts = format_discord_timestamps(act.due_date)
@@ -129,20 +134,33 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
                     # Tier 2 (T-6h): Channel Escalation Ping
                     if act.reminder_tier == "6h":
                         guild = self.bot.get_guild(int(act.guild_id))
-                        if guild:
-                            tasks_ch = await self.channel_router.get(guild, "tasks")
-                            if tasks_ch:
-                                embed = discord.Embed(
-                                    title=f"⚠️ Escalation Alert (T-6h): {act.task_id}",
-                                    description=f"Task **{act.description}** assigned to <@{act.user_id}> is due in under 6 hours!\n\n**Deadline:** {abs_ts} ({rel_ts})",
-                                    color=COLOR_WARNING,
-                                    timestamp=now
-                                )
-                                embed.set_footer(text=f"Complete: /task complete {act.task_id} • Or request extension: /task extend")
-                                try:
-                                    await tasks_ch.send(content=f"⚠️ Attention <@{act.user_id}>:", embed=embed)
-                                except Exception:
-                                    pass
+                        tasks_ch = await self.channel_router.get(guild, "tasks") if guild else None
+                        if not tasks_ch:
+                            # Nowhere to post, so retrying every tick cannot help.
+                            # Recorded and logged: a missing channel binding is a
+                            # configuration fault, not a thing to fail quietly over.
+                            logger.warning(
+                                "No #tasks channel for the T-6h escalation of %s (guild %s) - dropped",
+                                act.task_id, act.guild_id,
+                            )
+                            await self._mark_fired(act, now)
+                            continue
+                        embed = discord.Embed(
+                            title=f"⚠️ Escalation Alert (T-6h): {act.task_id}",
+                            description=f"Task **{act.description}** assigned to <@{act.user_id}> is due in under 6 hours!\n\n**Deadline:** {abs_ts} ({rel_ts})",
+                            color=COLOR_WARNING,
+                            timestamp=now
+                        )
+                        embed.set_footer(text=f"Complete: /task complete {act.task_id} • Or request extension: /task extend")
+                        try:
+                            await tasks_ch.send(content=f"⚠️ Attention <@{act.user_id}>:", embed=embed)
+                        except Exception as e:
+                            logger.error(
+                                "T-6h escalation for %s failed to post; leaving it unrecorded to retry: %s",
+                                act.task_id, e,
+                            )
+                            continue
+                        await self._mark_fired(act, now)
                         await self.service.acknowledge_reminder(act.task_id, act.reminder_tier)
                         continue
 
@@ -157,7 +175,14 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
                     if not user:
                         try:
                             user = await self.bot.fetch_user(int(act.user_id))
-                        except Exception:
+                        except Exception as e:
+                            # Unrecorded, so the tier is retried rather than lost.
+                            # Log it: a member who can never be fetched would
+                            # otherwise accumulate silent retries forever.
+                            logger.warning(
+                                "Could not resolve user %s for the %s reminder on %s; will retry: %s",
+                                act.user_id, act.reminder_tier, act.task_id, e,
+                            )
                             continue
 
                     color = COLOR_DANGER if act.reminder_tier == "1h" else COLOR_WARNING
@@ -179,9 +204,14 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
 
                     try:
                         await user.send(embed=embed, file=v_file)
-                        await self.service.acknowledge_reminder(act.task_id, act.reminder_tier)
                     except Exception as e:
-                        logger.warning("Could not DM reminder to user %s: %s", act.user_id, e)
+                        logger.warning(
+                            "Could not DM the %s reminder for %s to user %s; leaving it unrecorded to retry: %s",
+                            act.reminder_tier, act.task_id, act.user_id, e,
+                        )
+                        continue
+                    await self._mark_fired(act, now)
+                    await self.service.acknowledge_reminder(act.task_id, act.reminder_tier)
                 except Exception as e:
                     logger.error(
                         "Reminder dispatch failed for %s (tier %s): %s",
@@ -192,6 +222,22 @@ class TaskReminderCog(commands.Cog, name="Task Reminder Loop"):
             await self._dispatch_wall_of_shame(now)
         except Exception as e:
             logger.error("Error in task reminder loop: %s", e, exc_info=True)
+
+    async def _mark_fired(self, act, now) -> None:
+        """Record that this tier reached the member, so a reboot will not repeat it.
+
+        Called only after a delivery succeeded. If this write fails the worst outcome
+        is a duplicate reminder after a restart - far better than recording first and
+        permanently losing every reminder whose delivery failed.
+        """
+        try:
+            await self.alert_fire_repo.record_fire(
+                AlertFire(task_id=act.task_id, alert_tier=act.reminder_tier, fired_at=now)
+            )
+        except Exception as e:
+            logger.warning(
+                "Could not record the fire for %s/%s: %s", act.task_id, act.reminder_tier, e
+            )
 
     @reminder_loop.before_loop
     async def before_reminder_loop(self):

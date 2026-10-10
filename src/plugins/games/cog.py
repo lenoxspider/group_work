@@ -206,8 +206,13 @@ class GamesCog(commands.GroupCog, group_name="event"):
                     f"⚠️ Round `{event.event_id}` was abandoned mid-game, so the Front Man "
                     f"has concluded it. Survivors: **{result.survivor_count}**."
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                # The event is already concluded, so the arena cannot wedge - but the
+                # players are never told how their round ended.
+                logger.error(
+                    "Round %s was concluded as abandoned but the arena was not told: %s",
+                    event.event_id, e,
+                )
 
     async def _resolve_registration(self, guild: discord.Guild) -> None:
         gid = str(guild.id)
@@ -236,8 +241,11 @@ class GamesCog(commands.GroupCog, group_name="event"):
                     f"⌛ Registration for `{event.event_id}` closed - nobody stepped "
                     "forward. The arena is open again."
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "Registration for %s was cancelled but the arena was not told: %s",
+                    event.event_id, e,
+                )
 
     @registration_sweep.before_loop
     async def before_registration_sweep(self):

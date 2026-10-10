@@ -159,14 +159,7 @@ class TasksCog(commands.Cog, name="Task Ledger"):
         try:
             result = await self.service.complete_task(task_id.strip().upper())
             if result.needs_verification:
-                if result.channel_id and result.message_id:
-                    ch = self.bot.get_channel(int(result.channel_id))
-                    if ch:
-                        try:
-                            msg = await ch.fetch_message(int(result.message_id))
-                            await msg.edit(embed=build_task_embed(result))
-                        except Exception:
-                            pass
+                await self._update_task_card(result)
                 embed = build_task_embed(result)
                 await interaction.followup.send(
                     content=f"📤 Task `{result.task_id}` submitted! Awaiting verification from buddy <@{result.verifier_id}> 🔍",
@@ -175,15 +168,7 @@ class TasksCog(commands.Cog, name="Task Ledger"):
                 return
 
             disabled_view = TaskActionView(self.service, is_completed=True)
-            # Update ledger message if it exists
-            if result.channel_id and result.message_id:
-                ch = self.bot.get_channel(int(result.channel_id))
-                if ch:
-                    try:
-                        msg = await ch.fetch_message(int(result.message_id))
-                        await msg.edit(embed=build_task_embed(result), view=disabled_view)
-                    except Exception:
-                        pass
+            await self._update_task_card(result, view=disabled_view)
 
             embed = build_task_embed(result)
             timing_str = " (on time ⚡)" if result.is_on_time else " (late ⚠️)"
@@ -195,6 +180,36 @@ class TasksCog(commands.Cog, name="Task Ledger"):
         except AppError as e:
             await interaction.followup.send(f"❌ {e.message}", ephemeral=True)
 
+    async def _update_task_card(self, result, view=None) -> None:
+        """Refresh the posted task card after the service has already committed.
+
+        The status changed and the spi moved before this runs, so a failure here is
+        cosmetic and must never fail the command - the member did complete the task,
+        and reporting otherwise would be a lie about money they were paid. It is
+        logged rather than swallowed: a card left showing live buttons for a task
+        that is already finished is the kind of thing nobody reports and everybody
+        quietly stops trusting.
+
+        The int() conversions sit inside the guard deliberately. Outside it a
+        malformed channel id escapes as a ValueError to the global handler, which
+        then reports "something went wrong" for a task that in fact succeeded.
+        """
+        if not (result.channel_id and result.message_id):
+            return
+        try:
+            ch = self.bot.get_channel(int(result.channel_id))
+            if not ch:
+                return
+            msg = await ch.fetch_message(int(result.message_id))
+            if view is not None:
+                await msg.edit(embed=build_task_embed(result), view=view)
+            else:
+                await msg.edit(embed=build_task_embed(result))
+        except Exception as e:
+            logger.warning(
+                "Task %s was updated but its ledger card is now stale: %s", result.task_id, e
+            )
+
     @task_group.command(name="verify", description="Sign off on a submitted deliverable as accountability buddy")
     @app_commands.describe(task_id="The ID of the task to verify (e.g. TASK-A1B2)")
     @requires_citizen()
@@ -204,14 +219,7 @@ class TasksCog(commands.Cog, name="Task Ledger"):
             clean_id = task_id.strip().upper()
             result = await self.service.verify_task(clean_id, str(interaction.user.id))
             disabled_view = TaskActionView(self.service, is_completed=True)
-            if result.channel_id and result.message_id:
-                ch = self.bot.get_channel(int(result.channel_id))
-                if ch:
-                    try:
-                        msg = await ch.fetch_message(int(result.message_id))
-                        await msg.edit(embed=build_task_embed(result), view=disabled_view)
-                    except Exception:
-                        pass
+            await self._update_task_card(result, view=disabled_view)
 
             embed = build_task_embed(result)
             await interaction.followup.send(

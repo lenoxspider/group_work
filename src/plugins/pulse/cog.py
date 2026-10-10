@@ -58,8 +58,10 @@ class PulseCog(commands.Cog, name="Pulse"):
         await self.service.grant(gid, str(message.author.id))
         try:
             await message.reply(f"🏆 Credited — **+{PULSE_PRIZE_SPI} spi** · win *{pulse.label}*.")
-        except Exception:
-            pass
+        except Exception as e:
+            # The spi is already granted, so this is only the confirmation - but a
+            # winner who is never told will assume the bot ate their prize.
+            logger.warning("Pulse %s was paid to %s but the confirmation did not post: %s", pulse.label, message.author.id, e)
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
@@ -86,8 +88,8 @@ class PulseCog(commands.Cog, name="Pulse"):
                     f"🏆 <@{payload.user_id}> — fastest hand in the collective! "
                     f"**+{PULSE_PRIZE_SPI} spi** · won *{pulse.label}*."
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Pulse %s was paid to %s but the announcement did not post: %s", pulse.label, payload.user_id, e)
 
     @commands.Cog.listener()
     async def on_interaction(self, interaction: discord.Interaction):
@@ -133,17 +135,18 @@ class PulseCog(commands.Cog, name="Pulse"):
             if pulse:
                 if pulse.is_expired():
                     await self.service.clear(gid)
-                    ch = self.bot.get_channel(int(pulse.channel_id))
-                    if ch:
+                    try:
+                        ch = self.bot.get_channel(int(pulse.channel_id))
+                    except (TypeError, ValueError):
+                        logger.error("Pulse %s has an unreadable channel id %r", pulse.label, pulse.channel_id)
+                        ch = None
+                    if ch and pulse.mode == "vote":
+                        await self._resolve_expired_vote(ch, pulse)
+                    elif ch:
                         try:
-                            if pulse.mode == "vote":
-                                msg = await ch.fetch_message(int(pulse.message_id))
-                                result = await self.service.resolve_vote(pulse, msg)
-                                await ch.send(result["text"])
-                            else:
-                                await ch.send(f"⌛ **{pulse.label}** expired — the answer was **{pulse.answer}**.")
-                        except Exception:
-                            pass
+                            await ch.send(f"⌛ **{pulse.label}** expired — the answer was **{pulse.answer}**.")
+                        except Exception as e:
+                            logger.warning("Could not post the expiry notice for %s: %s", pulse.label, e)
                 continue
             try:
                 if await self._should_fire(gid):
@@ -152,6 +155,34 @@ class PulseCog(commands.Cog, name="Pulse"):
                         await self.service.fire(gid, ch)
             except Exception as e:
                 logger.warning("Pulse fire failed for %s: %s", gid, e)
+
+    async def _resolve_expired_vote(self, ch, pulse) -> None:
+        """Judge an expired vote.
+
+        The pulse row is already cleared before this runs, so nothing here can be
+        retried. That is why resolve_vote is not wrapped in the same blanket
+        handler as the announcements around it: it levies the fine and decides the
+        verdict, and swallowing a failure there means a jury voted, the outcome was
+        destroyed, and the log holds no trace that it ever happened. Posting the
+        result is cosmetic and may fail quietly; producing it may not.
+        """
+        msg = None
+        try:
+            msg = await ch.fetch_message(int(pulse.message_id))
+        except Exception as e:
+            logger.error("Could not fetch the vote message for %s; judging it as silent: %s", pulse.label, e)
+        try:
+            result = await self.service.resolve_vote(pulse, msg)
+        except Exception as e:
+            logger.error(
+                "Vote on %s expired but could not be resolved - the verdict and any fine are lost: %s",
+                pulse.label, e, exc_info=True,
+            )
+            return
+        try:
+            await ch.send(result["text"])
+        except Exception as e:
+            logger.error("Verdict on %s was resolved but could not be posted: %s", pulse.label, e)
 
     @pulse_loop.before_loop
     async def before_pulse_loop(self):

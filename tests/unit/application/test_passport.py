@@ -38,6 +38,21 @@ class TestPassportRenderer(unittest.TestCase):
         image = Image.open(io.BytesIO(png))
         self.assertEqual(image.size, (W, H))
 
+    def test_an_unknown_balance_renders_rather_than_claiming_zero(self):
+        """balance=None means the ledger could not be read, not that it is empty.
+
+        The renderer formatted it with f"{balance:,}", so None raised TypeError and
+        /me fell through to a text card that printed 0 spi at the time. A passport
+        is the one document meant to be authoritative about a citizen; it must not
+        certify a solvent member as broke because a read failed.
+        """
+        png = render_passport(PassportData(
+            display_name="yoof1337", citizen_no="456123",
+            status="citizen", balance=None, signed_at="2026-09-28T15:54:37+00:00",
+        ))
+        self.assertTrue(png.startswith(PNG_MAGIC))
+        Image.open(io.BytesIO(png)).verify()
+
     def test_renders_with_an_avatar(self):
         png = render_passport(PassportData(
             display_name="Remirêz Velly", citizen_no="000001",
