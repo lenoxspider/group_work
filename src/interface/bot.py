@@ -11,12 +11,14 @@ What it does NOT do:
 - Does NOT execute business logic or database queries directly.
 """
 
+import asyncio
 import logging
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from src.config.settings import Settings
+from src.infrastructure import watchdog
 from src.infrastructure.database.connection import DatabaseManager
 from src.infrastructure.database.core_schema import CORE_SCHEMA
 from src.infrastructure.database.channel_binding_sqlite_repo import SQLiteChannelBindingRepository
@@ -145,6 +147,30 @@ class GroupAccountabilityBot(commands.Bot):
                 logger.info("Synced %d global slash commands.", len(synced))
         except Exception as e:
             logger.error("Failed to sync slash commands: %s", e, exc_info=True)
+
+        # Tell systemd we are up, then start beating. Only under systemd - on a
+        # laptop there is no socket and no point running the task.
+        if watchdog.notify("READY=1"):
+            self.loop.create_task(self._systemd_heartbeat())
+            logger.info(
+                "systemd watchdog armed: heartbeat every %ss", watchdog.HEARTBEAT_SECONDS
+            )
+
+    async def _systemd_heartbeat(self) -> None:
+        """Ping systemd from the event loop, so a blocked loop stops pinging.
+
+        This is the only defence against a hang: the process stays alive and the
+        gateway stays connected, so Restart=always would otherwise never fire.
+        Deliberately never cancelled and never allowed to raise out.
+        """
+        while True:
+            try:
+                await asyncio.sleep(watchdog.HEARTBEAT_SECONDS)
+                watchdog.notify("WATCHDOG=1")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning("Watchdog heartbeat failed: %s", e)
 
     async def on_ready(self) -> None:
         logger.info("Connected to Discord as %s#%s (ID: %s)", self.user.name, self.user.discriminator, self.user.id)

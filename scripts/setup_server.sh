@@ -156,7 +156,12 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+# Type=notify + WatchdogSec: the bot pings from its own event loop every 20s
+# (src/infrastructure/watchdog.py). If the loop blocks, the pings stop and
+# systemd restarts it - which Restart=alone cannot do, because a hung process
+# still looks alive. 60s allows three missed beats before acting.
+Type=notify
+WatchdogSec=60
 User=${RUN_USER}
 Group=${RUN_USER}
 WorkingDirectory=${INSTALL_DIR}
